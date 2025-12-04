@@ -1,0 +1,33 @@
+[project]
+name = "exocortex"
+version = "0.1.0"
+description = "Local MCP Server acting as your external brain for development insights."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "kuzu>=0.9.0",
+    "fastembed>=0.4.0",
+    "numpy>=1.26.0",
+]
+
+[project.scripts]
+exocortex = "exocortex.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/exocortex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
