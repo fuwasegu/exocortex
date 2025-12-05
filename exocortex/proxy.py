@@ -172,15 +172,16 @@ class StdioToSSEProxy:
         session = self._session
 
         if method == "initialize":
+            # Return capabilities that indicate tools/prompts/resources are available
             return {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {
-                    "tools": {},
-                    "prompts": {},
-                    "resources": {},
+                    "tools": {"listChanged": True},
+                    "prompts": {"listChanged": True},
+                    "resources": {"subscribe": False, "listChanged": True},
                 },
                 "serverInfo": {
-                    "name": "exocortex-proxy",
+                    "name": "exocortex",
                     "version": "0.1.0",
                 },
             }
