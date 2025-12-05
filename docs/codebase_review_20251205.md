@@ -47,7 +47,7 @@ Exocortex プロジェクトは、**Clean Architecture (DDD的構成)** を採�
     *   ベクトル計算（類似度計算）
 
 ### ⚠️ Warning: スケーラビリティの懸念 (O(N)処理)
-新規記憶の保存時 (`store_memory`) に実行される分析処理 (`_analyze_new_memory`) にパフォーマンス上の懸念があります。
+新規記憶の保存時 (`exo_store_memory`) に実行される分析処理 (`_analyze_new_memory`) にパフォーマンス上の懸念があります。
 
 ```python
 # exocortex/domain/services.py
@@ -77,7 +77,7 @@ all_memories = self._repo.get_all_with_embeddings()
 
 ### Phase 2: パフォーマンス改善 (High Priority)
 実運用での遅延を防ぐための改修です。
-1.  **ベクトル検索の委譲**: `store_memory` 時の類似検索を、Pythonループから KùzuDB のネイティブベクトル検索 (`CALL nn_search`) に切り替える。
+1.  **ベクトル検索の委譲**: `exo_store_memory` 時の類似検索を、Pythonループから KùzuDB のネイティブベクトル検索 (`CALL nn_search`) に切り替える。
 
 ### Phase 3: リファクタリング (Medium Priority)
 保守性を高めるための改修です。

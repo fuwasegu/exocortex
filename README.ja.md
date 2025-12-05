@@ -85,24 +85,24 @@ uv run exocortex
 
 | ツール | 説明 |
 |--------|------|
-| `ping` | サーバーの疎通確認 |
-| `store_memory` | 新しい記憶を保存 |
-| `recall_memories` | セマンティック検索で関連する記憶を想起 |
-| `list_memories` | 記憶の一覧を取得（ページネーション対応） |
-| `get_memory` | IDを指定して特定の記憶を取得 |
-| `delete_memory` | 記憶を削除 |
-| `get_stats` | 統計情報を取得 |
+| `exo_ping` | サーバーの疎通確認 |
+| `exo_store_memory` | 新しい記憶を保存 |
+| `exo_recall_memories` | セマンティック検索で関連する記憶を想起 |
+| `exo_list_memories` | 記憶の一覧を取得（ページネーション対応） |
+| `exo_get_memory` | IDを指定して特定の記憶を取得 |
+| `exo_delete_memory` | 記憶を削除 |
+| `exo_get_stats` | 統計情報を取得 |
 
 ### 高度なツール
 
 | ツール | 説明 |
 |--------|------|
-| `link_memories` | 2つの記憶をリンク（関連付け） |
-| `unlink_memories` | リンクを削除 |
-| `update_memory` | 記憶の内容・タグ・タイプを更新 |
-| `explore_related` | グラフ探索で関連記憶を発見 |
-| `get_memory_links` | 記憶のリンク一覧を取得 |
-| `analyze_knowledge` | 知識ベースの健全性分析と改善提案 |
+| `exo_link_memories` | 2つの記憶をリンク（関連付け） |
+| `exo_unlink_memories` | リンクを削除 |
+| `exo_update_memory` | 記憶の内容・タグ・タイプを更新 |
+| `exo_explore_related` | グラフ探索で関連記憶を発見 |
+| `exo_get_memory_links` | 記憶のリンク一覧を取得 |
+| `exo_analyze_knowledge` | 知識ベースの健全性分析と改善提案 |
 
 ### 🤖 知識の自律的改善（Knowledge Autonomy）
 
@@ -113,7 +113,7 @@ Exocortexは知識グラフを自動的に改善します！記憶を保存す�
 3. **パターンを認識**: 成功が過去の失敗を解決したことを認識
 
 ```json
-// store_memory のレスポンス例（提案付き）
+// exo_store_memory のレスポンス例（提案付き）
 {
   "success": true,
   "memory_id": "...",
@@ -129,13 +129,13 @@ Exocortexは知識グラフを自動的に改善します！記憶を保存す�
     {
       "type": "potential_duplicate",
       "message": "この記憶は既存のものと非常に類似しています (94%)",
-      "suggested_action": "代わりに update_memory を使用してください"
+      "suggested_action": "代わりに exo_update_memory を使用してください"
     }
   ]
 }
 ```
 
-### リレーションタイプ（`link_memories`用）
+### リレーションタイプ（`exo_link_memories`用）
 
 | タイプ | 説明 |
 |--------|------|

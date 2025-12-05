@@ -23,7 +23,7 @@
 - **トリガー:** バグ修正やトラブルシューティングが完了した時
 - **シナリオ:**
   1. 開発者が「このバグの原因と解決策をExocortexに記憶して」と指示
-  2. AIが `store_memory` を呼び出し、解決策を構造化して保存
+  2. AIが `exo_store_memory` を呼び出し、解決策を構造化して保存
   3. 関連タグ（使用技術）とコンテキスト（プロジェクト名）が自動的に紐付けられる
 - **期待結果:** Memory(type=Success)として永続化される
 
@@ -32,7 +32,7 @@
 - **トリガー:** 類似の問題に遭遇した時
 - **シナリオ:**
   1. 開発者が「async/awaitでデッドロックになる。過去に似た問題はあった？」と質問
-  2. AIが `recall_memories` を呼び出し、セマンティック検索を実行
+  2. AIが `exo_recall_memories` を呼び出し、セマンティック検索を実行
   3. 類似度の高い記憶がコンテキスト情報付きで返却される
 - **期待結果:** 過去の解決策が文脈付きで提示され、問題解決が加速する
 
@@ -42,7 +42,7 @@
 - **シナリオ:**
   1. プロジェクトAで「FastAPI + SQLAlchemy」の知見を記憶
   2. プロジェクトBで同じ技術スタックを使用開始
-  3. `recall_memories` でタグ「FastAPI」に関連する記憶を横断検索
+  3. `exo_recall_memories` でタグ「FastAPI」に関連する記憶を横断検索
 - **期待結果:** プロジェクトを跨いだ知識の再利用が可能
 
 ### UC-4: 失敗パターンの学習
@@ -59,8 +59,8 @@
 - **トリガー:** 記憶の整理・確認が必要な時
 - **シナリオ:**
   1. 開発者が「Exocortexに保存されている記憶を一覧表示して」と指示
-  2. AIが `list_memories` を呼び出し、記憶の概要リストを取得
-  3. 不要な記憶があれば `delete_memory` で削除
+  2. AIが `exo_list_memories` を呼び出し、記憶の概要リストを取得
+  3. 不要な記憶があれば `exo_delete_memory` で削除
 - **期待結果:** 記憶の品質を維持できる
 
 ### UC-6: 知識のリンクと探索
@@ -68,8 +68,8 @@
 - **トリガー:** 関連する知識を明示的に紐付けたい時
 - **シナリオ:**
   1. 開発者が「さっきの解決策は、以前記録したコネクションプーリングの原則の適用例だね」と指示
-  2. AIが `link_memories` を呼び出し、2つの記憶をリンク（relation_type: "extends"）
-  3. 後日、原則の記憶から `explore_related` で関連記憶を探索
+  2. AIが `exo_link_memories` を呼び出し、2つの記憶をリンク（relation_type: "extends"）
+  3. 後日、原則の記憶から `exo_explore_related` で関連記憶を探索
   4. リンクされた適用例が自動的に表示される
 - **期待結果:** 知識ネットワークが構築され、関連情報の発見が容易になる
 
@@ -78,7 +78,7 @@
 - **トリガー:** 既存の記憶に追記や修正が必要な時
 - **シナリオ:**
   1. 以前記録した知見に新しい情報を追加したい
-  2. AIが `update_memory` を呼び出し、内容を更新
+  2. AIが `exo_update_memory` を呼び出し、内容を更新
   3. ベクトル埋め込みも自動的に再計算される
 - **期待結果:** 記憶が進化し、常に最新の知識を反映
 
@@ -207,7 +207,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ## 5. MCPツール定義
 
-### 5.1 store_memory (記憶する)
+### 5.1 exo_store_memory (記憶する)
 
 新しい知見をExocortexに永続化する。
 
@@ -238,7 +238,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ---
 
-### 5.2 recall_memories (想起する)
+### 5.2 exo_recall_memories (想起する)
 
 現在の課題に関連する過去の記憶を、ハイブリッド検索で呼び覚ます。
 
@@ -280,7 +280,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ---
 
-### 5.3 list_memories (一覧取得)
+### 5.3 exo_list_memories (一覧取得)
 
 保存されている記憶の一覧を取得する。
 
@@ -314,7 +314,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ---
 
-### 5.4 get_memory (詳細取得)
+### 5.4 exo_get_memory (詳細取得)
 
 特定の記憶の詳細を取得する。
 
@@ -340,7 +340,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ---
 
-### 5.5 delete_memory (削除)
+### 5.5 exo_delete_memory (削除)
 
 指定した記憶を削除する。
 
@@ -360,7 +360,7 @@ CREATE VECTOR INDEX memory_embedding_index ON Memory(embedding)
 
 ---
 
-### 5.6 get_stats (統計情報)
+### 5.6 exo_get_stats (統計情報)
 
 Exocortexの統計情報を取得する。
 
@@ -387,7 +387,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.7 link_memories (記憶をリンク)
+### 5.7 exo_link_memories (記憶をリンク)
 
 2つの記憶を明示的にリンクする。
 
@@ -412,7 +412,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.8 unlink_memories (リンク解除)
+### 5.8 exo_unlink_memories (リンク解除)
 
 記憶間のリンクを削除する。
 
@@ -432,7 +432,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.9 update_memory (記憶を更新)
+### 5.9 exo_update_memory (記憶を更新)
 
 既存の記憶を更新する。
 
@@ -461,7 +461,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.10 explore_related (関連記憶を探索)
+### 5.10 exo_explore_related (関連記憶を探索)
 
 指定した記憶から関連する記憶をグラフ探索で発見する。
 
@@ -504,7 +504,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.11 get_memory_links (リンク一覧取得)
+### 5.11 exo_get_memory_links (リンク一覧取得)
 
 指定した記憶からの出発リンクを取得する。
 
@@ -532,7 +532,7 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.12 analyze_knowledge (知識分析)
+### 5.12 exo_analyze_knowledge (知識分析)
 
 知識ベースの健全性を分析し、改善提案を行う。
 
@@ -577,9 +577,9 @@ Exocortexの統計情報を取得する。
 
 ---
 
-### 5.13 store_memory の自動分析機能
+### 5.13 exo_store_memory の自動分析機能
 
-`store_memory` は記憶を保存した後、自動的に以下を分析して戻り値に含める:
+`exo_store_memory` は記憶を保存した後、自動的に以下を分析して戻り値に含める:
 
 **追加フィールド:**
 
@@ -630,8 +630,8 @@ Exocortexの統計情報を取得する。
 | 項目 | 目標値 | 備考 |
 |------|--------|------|
 | サーバー起動時間 | 3秒以内 | Embeddingモデルの遅延ロード採用 |
-| `store_memory` 応答 | 1秒以内 | Embedding生成含む |
-| `recall_memories` 応答 | 500ms以内 | 1,000記憶時 |
+| `exo_store_memory` 応答 | 1秒以内 | Embedding生成含む |
+| `exo_recall_memories` 応答 | 500ms以内 | 1,000記憶時 |
 | メモリ使用量 | 500MB以内 | モデルロード時 |
 
 ### 6.2 スケーラビリティ
@@ -740,7 +740,7 @@ exocortex/                      # プロジェクトルート
    - 環境変数の読み込み
 3. MCPサーバー起動 (`main.py`, `server.py`)
    - Stdioモードでのサーバー起動
-   - `ping` ツール実装（疎通確認用）
+   - `exo_ping` ツール実装（疎通確認用）
 4. 接続テスト
    - ターミナルでの起動確認
    - Cursor設定での認識確認
@@ -760,26 +760,26 @@ exocortex/                      # プロジェクトルート
    - Pydanticモデル定義
 
 ### Phase 3: コアツール実装 ✅
-**目標:** `store_memory` と `recall_memories` を実装する。
+**目標:** `exo_store_memory` と `exo_recall_memories` を実装する。
 
-1. `store_memory` 実装
+1. `exo_store_memory` 実装
    - 要約生成、ベクトル化、グラフ保存
    - 自動リンク提案・重複検出
-2. `recall_memories` 実装
+2. `exo_recall_memories` 実装
    - ベクトル検索 + フィルタリング
    - コンテキスト・タグ取得
 
 ### Phase 4: 管理ツール実装 ✅
 **目標:** CRUD操作とユーティリティツールを実装する。
 
-1. `list_memories` 実装
-2. `get_memory` 実装
-3. `delete_memory` 実装
-4. `get_stats` 実装
-5. `update_memory` 実装
-6. `link_memories` / `unlink_memories` 実装
-7. `explore_related` 実装
-8. `analyze_knowledge` 実装
+1. `exo_list_memories` 実装
+2. `exo_get_memory` 実装
+3. `exo_delete_memory` 実装
+4. `exo_get_stats` 実装
+5. `exo_update_memory` 実装
+6. `exo_link_memories` / `exo_unlink_memories` 実装
+7. `exo_explore_related` 実装
+8. `exo_analyze_knowledge` 実装
 
 ### Phase 5: 統合テスト ✅
 **目標:** AIアシスタントとの連携を確認する。
@@ -793,11 +793,11 @@ exocortex/                      # プロジェクトルート
 ## 10. 将来の拡張案（v2以降）
 
 ### 実装済み ✅
-- ~~**`update_memory`**: 既存記憶の更新~~
+- ~~**`exo_update_memory`**: 既存記憶の更新~~
 - ~~**記憶の関連付け**: `(:Memory)-[:RELATED_TO]->(:Memory)`~~
-- ~~**グラフ探索**: `explore_related` による関連記憶の発見~~
-- ~~**知識の自律的改善**: `store_memory` 時の自動リンク提案・重複検出~~
-- ~~**知識分析**: `analyze_knowledge` による健全性チェック~~
+- ~~**グラフ探索**: `exo_explore_related` による関連記憶の発見~~
+- ~~**知識の自律的改善**: `exo_store_memory` 時の自動リンク提案・重複検出~~
+- ~~**知識分析**: `exo_analyze_knowledge` による健全性チェック~~
 
 ### 検討中
 - **`merge_memories`**: 類似記憶の統合

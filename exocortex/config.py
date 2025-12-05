@@ -79,5 +79,3 @@ def reset_config() -> None:
     """Reset the config (for testing)."""
     global _config
     _config = None
-
-
