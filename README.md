@@ -100,6 +100,60 @@ For development or customization.
 
 > **Note:** Your data is stored in `~/.exocortex/` and is preserved regardless of which option you choose.
 
+#### Option 3: Proxy Mode (Multiple Cursor Instances - Recommended)
+
+**Use this method if you want to use Exocortex from multiple Cursor windows simultaneously.**
+
+KùzuDB doesn't support concurrent writes from multiple processes. With the stdio approach where each Cursor instance spawns its own server process, lock conflicts occur. Proxy mode automatically starts a single SSE server in the background, and each Cursor instance connects via proxy.
+
+```json
+{
+  "mcpServers": {
+    "exocortex": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/fuwasegu/exocortex",
+        "exocortex",
+        "--mode", "proxy",
+        "--ensure-server"
+      ]
+    }
+  }
+}
+```
+
+**How it works:**
+1. First Cursor starts Exocortex → SSE server automatically starts in background
+2. Subsequent Cursors connect to the existing SSE server
+3. All Cursors share the same server → No lock conflicts!
+
+> **Note:** No manual server startup required. The `--ensure-server` option automatically starts the server if it's not running.
+
+#### Option 4: Manual Server Management (Advanced)
+
+If you prefer to manage the server manually:
+
+**Step 1: Start the server**
+
+```bash
+# Start the server in a terminal (can also run in background)
+uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
+```
+
+**Step 2: Configure Cursor**
+
+```json
+{
+  "mcpServers": {
+    "exocortex": {
+      "url": "http://127.0.0.1:8765/sse"
+    }
+  }
+}
+```
+
+> **Tip:** To auto-start the server on system boot, use `launchd` on macOS or `systemd` on Linux.
+
 ## MCP Tools
 
 ### Basic Tools
@@ -170,11 +224,16 @@ Exocortex automatically improves your knowledge graph! When you store a memory, 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EXOCORTEX_DATA_DIR` | `./data` | Database storage directory |
+| `EXOCORTEX_DATA_DIR` | `~/.exocortex` | Database storage directory |
 | `EXOCORTEX_LOG_LEVEL` | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
-| `EXOCORTEX_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model to use |
+| `EXOCORTEX_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model to use |
+| `EXOCORTEX_TRANSPORT` | `stdio` | Transport mode (stdio/sse/streamable-http) |
+| `EXOCORTEX_HOST` | `127.0.0.1` | Server bind address (for HTTP modes) |
+| `EXOCORTEX_PORT` | `8765` | Server port number (for HTTP modes) |
 
 ## Architecture
+
+### Stdio Mode (Default)
 
 ```
 ┌─────────────────┐     stdio      ┌─────────────────────────────┐
@@ -190,6 +249,28 @@ Exocortex automatically improves your knowledge graph! When you store a memory, 
                                   │  │  (Graph + Vector)     │  │
                                   │  └────────────────────────┘  │
                                   └─────────────────────────────┘
+```
+
+### HTTP/SSE Mode (Multiple Instances)
+
+```
+┌─────────────────┐                
+│  Cursor #1      │──────┐         
+└─────────────────┘      │         
+                         │  HTTP   ┌─────────────────────────────┐
+┌─────────────────┐      ├────────►│       Exocortex MCP         │
+│  Cursor #2      │──────┤   SSE   │      (Standalone)           │
+└─────────────────┘      │         │                             │
+                         │         │  ┌─────────┐  ┌──────────┐  │
+┌─────────────────┐      │         │  │ Tools   │  │ Embedding│  │
+│  Cursor #3      │──────┘         │  │ Handler │  │  Engine  │  │
+└─────────────────┘                │  └────┬────┘  └────┬─────┘  │
+                                   │       │            │        │
+                                   │  ┌────▼────────────▼─────┐  │
+                                   │  │       KùzuDB          │  │
+                                   │  │  (Graph + Vector)     │  │
+                                   │  └────────────────────────┘  │
+                                   └─────────────────────────────┘
 ```
 
 ### Knowledge Graph Structure
