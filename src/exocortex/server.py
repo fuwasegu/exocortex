@@ -352,6 +352,9 @@ def store_memory(
 
         return response
 
+    except ValueError as e:
+        # Input validation errors
+        return {"success": False, "error": str(e)}
     except Exception as e:
         logger.exception("Error storing memory")
         return {"success": False, "error": str(e)}
@@ -642,7 +645,7 @@ def link_memories(
             }
 
         db = get_db()
-        success = db.link_memories(
+        success, message = db.link_memories(
             source_id=source_id,
             target_id=target_id,
             relation_type=rel_type,
@@ -652,7 +655,7 @@ def link_memories(
         if not success:
             return {
                 "success": False,
-                "error": "One or both memories not found",
+                "error": message,
             }
 
         return {
@@ -660,6 +663,7 @@ def link_memories(
             "source_id": source_id,
             "target_id": target_id,
             "relation_type": rel_type.value,
+            "message": message,
         }
 
     except Exception as e:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +26,6 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Maximum summary length (characters)
-MAX_SUMMARY_LENGTH = 200
 
 
 class ExocortexDB:
@@ -127,6 +124,9 @@ class ExocortexDB:
             )
         """)
 
+        # Create vector index for efficient similarity search
+        self._create_vector_index()
+
         logger.info("Database schema initialized successfully")
 
     def _create_vector_index(self) -> None:
@@ -154,19 +154,99 @@ class ExocortexDB:
         Returns:
             Truncated summary.
         """
+        config = get_config()
+        max_length = config.max_summary_length
+
         # Simple truncation for now
         # Could be enhanced with AI summarization later
         content = content.strip()
-        if len(content) <= MAX_SUMMARY_LENGTH:
+        if len(content) <= max_length:
             return content
 
         # Truncate at word boundary
-        truncated = content[:MAX_SUMMARY_LENGTH]
+        truncated = content[:max_length]
         last_space = truncated.rfind(" ")
-        if last_space > MAX_SUMMARY_LENGTH * 0.7:
+        if last_space > max_length * 0.7:
             truncated = truncated[:last_space]
 
         return truncated + "..."
+
+    def _row_to_memory_with_context(
+        self,
+        row: tuple,
+        include_content: bool = True,
+        similarity: float | None = None,
+        related_memories: list[MemoryLink] | None = None,
+    ) -> MemoryWithContext:
+        """Convert a database row to MemoryWithContext.
+
+        Standard row format: (id, content, summary, memory_type, created_at, updated_at, context, tags)
+
+        Args:
+            row: Database result row.
+            include_content: Whether content is in the row (position 1).
+            similarity: Optional similarity score.
+            related_memories: Optional list of related memory links.
+
+        Returns:
+            MemoryWithContext object.
+        """
+        if include_content:
+            # Full row: (id, content, summary, memory_type, created_at, updated_at, context, tags)
+            tags = [t for t in row[7] if t] if row[7] else []
+            return MemoryWithContext(
+                id=row[0],
+                content=row[1],
+                summary=row[2],
+                memory_type=MemoryType(row[3]),
+                created_at=row[4],
+                updated_at=row[5],
+                context=row[6],
+                tags=tags,
+                similarity=similarity,
+                related_memories=related_memories or [],
+            )
+        else:
+            # Summary row: (id, summary, memory_type, created_at, updated_at, context, tags)
+            tags = [t for t in row[6] if t] if row[6] else []
+            return MemoryWithContext(
+                id=row[0],
+                content="",  # Not included
+                summary=row[1],
+                memory_type=MemoryType(row[2]),
+                created_at=row[3],
+                updated_at=row[4],
+                context=row[5],
+                tags=tags,
+                similarity=similarity,
+                related_memories=related_memories or [],
+            )
+
+    def _validate_store_input(
+        self, content: str, context_name: str, tags: list[str]
+    ) -> None:
+        """Validate input for store_memory.
+
+        Args:
+            content: Memory content.
+            context_name: Context name.
+            tags: List of tags.
+
+        Raises:
+            ValueError: If validation fails.
+        """
+        config = get_config()
+
+        if not content or not content.strip():
+            raise ValueError("Content cannot be empty")
+
+        if not context_name or not context_name.strip():
+            raise ValueError("Context name cannot be empty")
+
+        if len(tags) > config.max_tags_per_memory:
+            raise ValueError(
+                f"Too many tags (max {config.max_tags_per_memory}, got {len(tags)})"
+            )
 
     def store_memory(
         self,
@@ -187,7 +267,13 @@ class ExocortexDB:
 
         Returns:
             StoreMemoryResult with success status, memory ID, and knowledge insights.
+
+        Raises:
+            ValueError: If input validation fails.
         """
+        # Validate input
+        self._validate_store_input(content, context_name, tags)
+
         memory_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         summary = self._generate_summary(content)
@@ -302,10 +388,16 @@ class ExocortexDB:
         suggested_links: list[SuggestedLink] = []
         insights: list[KnowledgeInsight] = []
 
-        # Thresholds
-        LINK_THRESHOLD = 0.65  # Suggest link if similarity > this
-        DUPLICATE_THRESHOLD = 0.90  # Potential duplicate if > this
-        CONTRADICTION_KEYWORDS = ["but", "however", "instead", "wrong", "incorrect", "not", "don't", "shouldn't"]
+        # Get thresholds from config
+        config = get_config()
+        link_threshold = config.link_suggestion_threshold
+        duplicate_threshold = config.duplicate_detection_threshold
+        contradiction_threshold = config.contradiction_check_threshold
+
+        contradiction_keywords = [
+            "but", "however", "instead", "wrong", "incorrect",
+            "not", "don't", "shouldn't", "actually", "contrary"
+        ]
 
         # Get all other memories with embeddings
         result = self.conn.execute("""
@@ -328,7 +420,7 @@ class ExocortexDB:
                 continue
 
             similarity = embedding_engine.compute_similarity(embedding, other_embedding)
-            if similarity > LINK_THRESHOLD:
+            if similarity > link_threshold:
                 similar_memories.append((other_id, other_summary, similarity, other_type, other_context))
 
         # Sort by similarity
@@ -337,7 +429,7 @@ class ExocortexDB:
         # Analyze similar memories
         for other_id, other_summary, similarity, other_type, other_context in similar_memories[:5]:
             # Check for potential duplicate
-            if similarity > DUPLICATE_THRESHOLD:
+            if similarity > duplicate_threshold:
                 insights.append(
                     KnowledgeInsight(
                         insight_type="potential_duplicate",
@@ -369,11 +461,11 @@ class ExocortexDB:
 
         # Check for potential contradictions (heuristic)
         content_lower = content.lower()
-        has_contradiction_signals = any(kw in content_lower for kw in CONTRADICTION_KEYWORDS)
+        has_contradiction_signals = any(kw in content_lower for kw in contradiction_keywords)
 
         if has_contradiction_signals and similar_memories:
             top_similar = similar_memories[0]
-            if top_similar[2] > 0.7:  # Only if quite similar
+            if top_similar[2] > contradiction_threshold:
                 insights.append(
                     KnowledgeInsight(
                         insight_type="potential_contradiction",
@@ -815,7 +907,7 @@ class ExocortexDB:
         target_id: str,
         relation_type: RelationType,
         reason: str | None = None,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Create a link between two memories.
 
         Args:
@@ -825,8 +917,12 @@ class ExocortexDB:
             reason: Optional reason for the link.
 
         Returns:
-            True if link created, False if memories not found.
+            Tuple of (success, message). Message contains error description if failed.
         """
+        # Check if source and target are the same
+        if source_id == target_id:
+            return False, "Cannot link a memory to itself"
+
         # Check both memories exist
         result = self.conn.execute(
             """
@@ -837,7 +933,20 @@ class ExocortexDB:
         )
 
         if not result.has_next():
-            return False
+            return False, "One or both memories not found"
+
+        # Check if link already exists
+        result = self.conn.execute(
+            """
+            MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
+            RETURN r.relation_type
+            """,
+            parameters={"source_id": source_id, "target_id": target_id},
+        )
+
+        if result.has_next():
+            existing_type = result.get_next()[0]
+            return False, f"Link already exists with relation type '{existing_type}'"
 
         now = datetime.now(timezone.utc)
 
@@ -861,7 +970,7 @@ class ExocortexDB:
         )
 
         logger.info(f"Linked memory {source_id} -> {target_id} ({relation_type.value})")
-        return True
+        return True, "Link created successfully"
 
     def unlink_memories(self, source_id: str, target_id: str) -> bool:
         """Remove a link between two memories.
@@ -1250,20 +1359,9 @@ class ExocortexDB:
                     )
                 )
 
-        # Issue 3: Stale memories (not updated in long time, heuristic)
-        # Skip stale check for now - KùzuDB date arithmetic is version-dependent
-        # In production, could compare against a threshold date passed as parameter
-        stale_threshold = datetime.now(timezone.utc).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        # Subtract ~90 days
-        import calendar
-        month = stale_threshold.month - 3
-        year = stale_threshold.year
-        if month <= 0:
-            month += 12
-            year -= 1
-        stale_threshold = stale_threshold.replace(year=year, month=month)
+        # Issue 3: Stale memories (not updated in long time)
+        config = get_config()
+        stale_threshold = datetime.now(timezone.utc) - timedelta(days=config.stale_memory_days)
 
         result = self.conn.execute(
             """
