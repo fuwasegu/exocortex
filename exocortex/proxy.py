@@ -123,25 +123,32 @@ class StdioToSSEProxy:
                 # Read line from stdin in thread pool
                 line = await loop.run_in_executor(None, sys.stdin.readline)
                 if not line:
+                    logger.info("EOF received, exiting")
                     break
 
                 line = line.strip()
                 if not line:
                     continue
 
+                logger.debug(f"Received: {line[:200]}...")
+
                 try:
                     request = json.loads(line)
+                    logger.info(
+                        f"Processing method: {request.get('method', 'unknown')}"
+                    )
                     response = await self._handle_request(request)
                     if response is not None:
                         response_str = json.dumps(response)
+                        logger.debug(f"Response: {response_str[:200]}...")
                         print(response_str, flush=True)
                 except json.JSONDecodeError as e:
-                    logger.warning(f"Invalid JSON: {e}")
+                    logger.warning(f"Invalid JSON: {e}, line: {line[:100]}")
                 except Exception as e:
-                    logger.error(f"Error handling request: {e}")
+                    logger.error(f"Error handling request: {e}", exc_info=True)
 
             except Exception as e:
-                logger.error(f"Proxy read error: {e}")
+                logger.error(f"Proxy read error: {e}", exc_info=True)
                 break
 
     async def _handle_request(self, request: dict) -> dict | None:
@@ -189,30 +196,42 @@ class StdioToSSEProxy:
             return {}
         elif method == "tools/list":
             tools_result = await session.list_tools()
-            return {"tools": [t.model_dump() for t in tools_result.tools]}
+            # Exclude None values to avoid Cursor validation errors
+            return {
+                "tools": [t.model_dump(exclude_none=True) for t in tools_result.tools]
+            }
         elif method == "tools/call":
             tool_name = params.get("name", "")
             tool_args = params.get("arguments", {})
             call_result = await session.call_tool(tool_name, tool_args)
-            return call_result.model_dump()
+            return call_result.model_dump(exclude_none=True)
         elif method == "prompts/list":
             prompts_result = await session.list_prompts()
-            return {"prompts": [p.model_dump() for p in prompts_result.prompts]}
+            return {
+                "prompts": [
+                    p.model_dump(exclude_none=True) for p in prompts_result.prompts
+                ]
+            }
         elif method == "prompts/get":
             prompt_name = params.get("name", "")
             prompt_args = params.get("arguments", {})
             prompt_result = await session.get_prompt(prompt_name, prompt_args)
-            return prompt_result.model_dump()
+            return prompt_result.model_dump(exclude_none=True)
         elif method == "resources/list":
             resources_result = await session.list_resources()
-            return {"resources": [r.model_dump() for r in resources_result.resources]}
+            return {
+                "resources": [
+                    r.model_dump(exclude_none=True) for r in resources_result.resources
+                ]
+            }
         elif method == "resources/read":
             uri = params.get("uri", "")
             resource_result = await session.read_resource(uri)
-            return resource_result.model_dump()
+            return resource_result.model_dump(exclude_none=True)
         elif method == "ping":
             return {}
-        elif method == "notifications/cancelled":
+        elif method in ("notifications/cancelled", "notifications/initialized"):
+            # Notifications don't need a response
             return None
         else:
             logger.warning(f"Unknown method: {method}")
