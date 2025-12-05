@@ -210,6 +210,64 @@ Exocortexは知識グラフを自動的に改善します！記憶を保存す�
 }
 ```
 
+### 🧠 自動メモリ統合（Memory Consolidation）
+
+**人間が睡眠中に記憶を整理するように、Exocortexは記憶保存後にAIに整理を促します。**
+
+`exo_store_memory` が成功すると、レスポンスに `next_actions` が含まれ、AIに以下を指示します：
+
+1. **高類似度の記憶をリンク**（類似度 ≥ 0.7）
+2. **重複・矛盾の処理**
+3. **定期的な健全性チェック**（10件ごと）
+
+```json
+// next_actions を含むレスポンス例
+{
+  "success": true,
+  "memory_id": "abc123",
+  "summary": "...",
+  "consolidation_required": true,
+  "consolidation_message": "🧠 Memory stored. 2 consolidation action(s) required.",
+  "next_actions": [
+    {
+      "action": "link_memories",
+      "priority": "high",
+      "description": "Link to 2 related memories",
+      "details": [
+        {
+          "call": "exo_link_memories",
+          "args": {
+            "source_id": "abc123",
+            "target_id": "def456",
+            "relation_type": "extends",
+            "reason": "High semantic similarity"
+          }
+        }
+      ]
+    },
+    {
+      "action": "analyze_health",
+      "priority": "low",
+      "description": "Run knowledge base health check",
+      "details": { "call": "exo_analyze_knowledge" }
+    }
+  ]
+}
+```
+
+**期待される動作フロー:**
+```
+ユーザー: 「この知見を記憶して」
+    ↓
+AI: exo_store_memory() → next_actions を受け取る
+    ↓
+AI: 高優先度アクションごとに exo_link_memories() を実行
+    ↓
+AI: 「記憶しました。2つの関連記憶とリンクしました。」
+```
+
+> ⚠️ **重要な制限事項**: `next_actions` の実行はAIエージェントの判断に委ねられます。サーバーは `SERVER_INSTRUCTIONS` と `consolidation_required: true` で強く指示しますが、**実行は100%保証されません**。これはMCPプロトコルの制限で、サーバーは提案のみ可能で強制はできません。実際には、最新のAIアシスタントの多くはこれらの指示に従いますが、複雑な会話や他のタスクとの競合時にはスキップされる可能性があります。
+
 ### リレーションタイプ（`exo_link_memories`用）
 
 | タイプ | 説明 |

@@ -210,6 +210,64 @@ Exocortex automatically improves your knowledge graph! When you store a memory, 
 }
 ```
 
+### 🧠 Automatic Memory Consolidation
+
+**Like human sleep consolidates memories, Exocortex prompts the AI to organize after storing.**
+
+When `exo_store_memory` succeeds, the response includes `next_actions` that guide the AI to:
+
+1. **Link high-similarity memories** (similarity ≥ 0.7)
+2. **Handle duplicates and contradictions**
+3. **Run periodic health checks** (every 10 memories)
+
+```json
+// Example response with next_actions
+{
+  "success": true,
+  "memory_id": "abc123",
+  "summary": "...",
+  "consolidation_required": true,
+  "consolidation_message": "🧠 Memory stored. 2 consolidation action(s) required.",
+  "next_actions": [
+    {
+      "action": "link_memories",
+      "priority": "high",
+      "description": "Link to 2 related memories",
+      "details": [
+        {
+          "call": "exo_link_memories",
+          "args": {
+            "source_id": "abc123",
+            "target_id": "def456",
+            "relation_type": "extends",
+            "reason": "High semantic similarity"
+          }
+        }
+      ]
+    },
+    {
+      "action": "analyze_health",
+      "priority": "low",
+      "description": "Run knowledge base health check",
+      "details": { "call": "exo_analyze_knowledge" }
+    }
+  ]
+}
+```
+
+**Expected Flow:**
+```
+User: "Remember this insight"
+    ↓
+AI: exo_store_memory() → receives next_actions
+    ↓
+AI: exo_link_memories() for each high-priority action
+    ↓
+AI: "Stored and linked to 2 related memories."
+```
+
+> ⚠️ **Important Limitation**: Execution of `next_actions` is at the AI agent's discretion. While the server strongly instructs consolidation via `SERVER_INSTRUCTIONS` and `consolidation_required: true`, **execution is NOT 100% guaranteed**. This is an inherent limitation of the MCP protocol—servers can only suggest, not force actions. In practice, most modern AI assistants follow these instructions, but they may be skipped during complex conversations or when competing with other tasks.
+
 ### Relation Types for `exo_link_memories`
 
 | Type | Description |
