@@ -64,5 +64,3 @@ def set_test_env(temp_data_dir: Path) -> Generator[None, None, None]:
         os.environ["EXOCORTEX_DATA_DIR"] = old_env
     else:
         os.environ.pop("EXOCORTEX_DATA_DIR", None)
-
-

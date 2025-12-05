@@ -85,24 +85,24 @@ Add the following to your `~/.cursor/mcp.json`:
 
 | Tool | Description |
 |------|-------------|
-| `ping` | Health check to verify server is running |
-| `store_memory` | Store a new memory |
-| `recall_memories` | Recall relevant memories via semantic search |
-| `list_memories` | List stored memories with pagination |
-| `get_memory` | Get a specific memory by ID |
-| `delete_memory` | Delete a memory |
-| `get_stats` | Get statistics about stored memories |
+| `exo_ping` | Health check to verify server is running |
+| `exo_store_memory` | Store a new memory |
+| `exo_recall_memories` | Recall relevant memories via semantic search |
+| `exo_list_memories` | List stored memories with pagination |
+| `exo_get_memory` | Get a specific memory by ID |
+| `exo_delete_memory` | Delete a memory |
+| `exo_get_stats` | Get statistics about stored memories |
 
 ### Advanced Tools
 
 | Tool | Description |
 |------|-------------|
-| `link_memories` | Create a link between two memories |
-| `unlink_memories` | Remove a link between memories |
-| `update_memory` | Update content, tags, or type of a memory |
-| `explore_related` | Discover related memories via graph traversal |
-| `get_memory_links` | Get all outgoing links from a memory |
-| `analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
+| `exo_link_memories` | Create a link between two memories |
+| `exo_unlink_memories` | Remove a link between memories |
+| `exo_update_memory` | Update content, tags, or type of a memory |
+| `exo_explore_related` | Discover related memories via graph traversal |
+| `exo_get_memory_links` | Get all outgoing links from a memory |
+| `exo_analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
 
 ### 🤖 Knowledge Autonomy
 
@@ -113,7 +113,7 @@ Exocortex automatically improves your knowledge graph! When you store a memory, 
 3. **Identifies Patterns**: Recognizes when a success might resolve a past failure
 
 ```json
-// Example store_memory response with suggestions
+// Example exo_store_memory response with suggestions
 {
   "success": true,
   "memory_id": "...",
@@ -129,13 +129,13 @@ Exocortex automatically improves your knowledge graph! When you store a memory, 
     {
       "type": "potential_duplicate",
       "message": "This memory is very similar (94%) to an existing one.",
-      "suggested_action": "Use update_memory instead"
+      "suggested_action": "Use exo_update_memory instead"
     }
   ]
 }
 ```
 
-### Relation Types for `link_memories`
+### Relation Types for `exo_link_memories`
 
 | Type | Description |
 |------|-------------|

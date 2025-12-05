@@ -73,7 +73,7 @@ After storing a memory:
 - Review `insights` for potential duplicates or contradictions
 - Act on these suggestions to improve knowledge quality
 
-Use `analyze_knowledge` periodically to maintain knowledge base health.
+Use `exo_analyze_knowledge` periodically to maintain knowledge base health.
 """
 
 # =============================================================================
@@ -157,7 +157,7 @@ def recall_tips() -> str:
 - `type_filter`: Find only successes, failures, etc.
 
 ## After Finding Memories
-- Use `explore_related` to discover connected knowledge
+- Use `exo_explore_related` to discover connected knowledge
 - Check for more recent updates via links
 """
 
