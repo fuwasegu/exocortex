@@ -63,6 +63,25 @@
   3. 不要な記憶があれば `delete_memory` で削除
 - **期待結果:** 記憶の品質を維持できる
 
+### UC-6: 知識のリンクと探索
+- **アクター:** 開発者（AIアシスタント経由）
+- **トリガー:** 関連する知識を明示的に紐付けたい時
+- **シナリオ:**
+  1. 開発者が「さっきの解決策は、以前記録したコネクションプーリングの原則の適用例だね」と指示
+  2. AIが `link_memories` を呼び出し、2つの記憶をリンク（relation_type: "extends"）
+  3. 後日、原則の記憶から `explore_related` で関連記憶を探索
+  4. リンクされた適用例が自動的に表示される
+- **期待結果:** 知識ネットワークが構築され、関連情報の発見が容易になる
+
+### UC-7: 記憶の更新と進化
+- **アクター:** 開発者
+- **トリガー:** 既存の記憶に追記や修正が必要な時
+- **シナリオ:**
+  1. 以前記録した知見に新しい情報を追加したい
+  2. AIが `update_memory` を呼び出し、内容を更新
+  3. ベクトル埋め込みも自動的に再計算される
+- **期待結果:** 記憶が進化し、常に最新の知識を反映
+
 ---
 
 ## 3. アーキテクチャ
@@ -159,7 +178,23 @@ uv --directory /path/to/exocortex run exocortex
 ```cypher
 (:Memory)-[:ORIGINATED_IN]->(:Context)  // 記憶 → 形成されたコンテキスト
 (:Memory)-[:TAGGED_WITH]->(:Tag)        // 記憶 → 関連タグ
+(:Memory)-[:RELATED_TO]->(:Memory)      // 記憶 → 関連する記憶
 ```
+
+#### RELATED_TO リレーションのプロパティ
+
+| プロパティ | 型 | 説明 |
+|-----------|-----|------|
+| `relation_type` | STRING | リレーションの種類（下記参照） |
+| `reason` | STRING | リンクの理由（オプション） |
+| `created_at` | TIMESTAMP | 作成日時 |
+
+**Relation Type (Enum):**
+- `related`: 一般的な関連
+- `supersedes`: この記憶が対象を更新/置換
+- `contradicts`: この記憶が対象と矛盾
+- `extends`: この記憶が対象を拡張/詳細化
+- `depends_on`: この記憶が対象に依存
 
 ### 4.3 インデックス
 
@@ -352,6 +387,242 @@ Exocortexの統計情報を取得する。
 
 ---
 
+### 5.7 link_memories (記憶をリンク)
+
+2つの記憶を明示的にリンクする。
+
+**引数:**
+
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `source_id` | string | ✓ | リンク元の記憶ID |
+| `target_id` | string | ✓ | リンク先の記憶ID |
+| `relation_type` | string | ✓ | リレーションの種類 |
+| `reason` | string | | リンクの理由 |
+
+**戻り値:**
+```json
+{
+  "success": true,
+  "source_id": "...",
+  "target_id": "...",
+  "relation_type": "extends"
+}
+```
+
+---
+
+### 5.8 unlink_memories (リンク解除)
+
+記憶間のリンクを削除する。
+
+**引数:**
+
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `source_id` | string | ✓ | リンク元の記憶ID |
+| `target_id` | string | ✓ | リンク先の記憶ID |
+
+**戻り値:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### 5.9 update_memory (記憶を更新)
+
+既存の記憶を更新する。
+
+**引数:**
+
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `memory_id` | string | ✓ | 更新する記憶のID |
+| `content` | string | | 新しい内容 |
+| `tags` | string[] | | 新しいタグ（指定時は置換） |
+| `memory_type` | string | | 新しい種類 |
+
+**戻り値:**
+```json
+{
+  "success": true,
+  "memory_id": "...",
+  "changes": ["content", "tags"]
+}
+```
+
+**処理フロー:**
+1. `content` が指定された場合、新しいベクトルを生成
+2. `tags` が指定された場合、既存のTAGGED_WITHを削除し新規作成
+3. `updated_at` を更新
+
+---
+
+### 5.10 explore_related (関連記憶を探索)
+
+指定した記憶から関連する記憶をグラフ探索で発見する。
+
+**引数:**
+
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `memory_id` | string | ✓ | 中心となる記憶のID |
+| `include_tag_siblings` | bool | | 同じタグを持つ記憶を含める（デフォルト: true） |
+| `include_context_siblings` | bool | | 同じContextの記憶を含める（デフォルト: true） |
+
+**戻り値:**
+```json
+{
+  "memory_id": "...",
+  "linked": [
+    {
+      "id": "...",
+      "summary": "...",
+      "relation_type": "extends",
+      "reason": "具体的な適用例"
+    }
+  ],
+  "by_tag": [
+    {
+      "id": "...",
+      "summary": "...",
+      "shared_tags": ["Python", "async"]
+    }
+  ],
+  "by_context": [
+    {
+      "id": "...",
+      "summary": "...",
+      "context": "project-name"
+    }
+  ]
+}
+```
+
+---
+
+### 5.11 get_memory_links (リンク一覧取得)
+
+指定した記憶からの出発リンクを取得する。
+
+**引数:**
+
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `memory_id` | string | ✓ | 記憶のID |
+
+**戻り値:**
+```json
+{
+  "memory_id": "...",
+  "links": [
+    {
+      "target_id": "...",
+      "target_summary": "...",
+      "relation_type": "extends",
+      "reason": "PostgreSQLへの具体的な適用例",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 5.12 analyze_knowledge (知識分析)
+
+知識ベースの健全性を分析し、改善提案を行う。
+
+**引数:** なし
+
+**戻り値:**
+```json
+{
+  "total_memories": 42,
+  "health_score": 85.0,
+  "issues": [
+    {
+      "type": "orphan_memories",
+      "severity": "medium",
+      "message": "5 memories have no tags",
+      "affected_memory_ids": ["...", "..."],
+      "suggested_action": "Add tags using update_memory"
+    },
+    {
+      "type": "low_connectivity",
+      "severity": "low",
+      "message": "80% of memories have no explicit links",
+      "suggested_action": "Use explore_related and link_memories"
+    }
+  ],
+  "suggestions": [
+    "Address issues above to improve discoverability",
+    "Don't forget to record failures too!"
+  ],
+  "stats": {
+    "unlinked_memories": 34,
+    "memories_per_context": {"project-a": 20, "project-b": 22}
+  }
+}
+```
+
+**検出する問題:**
+- `orphan_memories`: タグのない記憶
+- `low_connectivity`: リンクの少なさ
+- `stale_memories`: 長期間更新されていない記憶
+- `similar_tags`: 正規化が必要な類似タグ
+
+---
+
+### 5.13 store_memory の自動分析機能
+
+`store_memory` は記憶を保存した後、自動的に以下を分析して戻り値に含める:
+
+**追加フィールド:**
+
+| フィールド | 説明 |
+|------------|------|
+| `suggested_links` | 類似度の高い既存記憶へのリンク提案 |
+| `insights` | 重複検出、矛盾検出などの知見 |
+
+**戻り値の例:**
+```json
+{
+  "success": true,
+  "memory_id": "...",
+  "summary": "...",
+  "suggested_links": [
+    {
+      "target_id": "existing-id",
+      "target_summary": "Related principle...",
+      "similarity": 0.78,
+      "suggested_relation": "extends",
+      "reason": "High semantic similarity; may be an application of this insight"
+    }
+  ],
+  "insights": [
+    {
+      "type": "potential_duplicate",
+      "message": "This memory is very similar (94%) to an existing one",
+      "related_memory_id": "...",
+      "confidence": 0.94,
+      "suggested_action": "Use update_memory instead"
+    }
+  ],
+  "link_suggestion_message": "Found 2 related memories. Consider linking them."
+}
+```
+
+**インサイトの種類:**
+- `potential_duplicate`: 非常に類似した既存記憶の検出 (類似度 > 90%)
+- `potential_contradiction`: 矛盾の可能性がある記憶の検出
+- `success_after_failure`: 成功が過去の失敗を解決した可能性
+
+---
+
 ## 6. 非機能要件
 
 ### 6.1 パフォーマンス
@@ -499,8 +770,17 @@ exocortex/
 
 ## 10. 将来の拡張案（v2以降）
 
-- **`update_memory`**: 既存記憶の更新
+### 実装済み ✅
+- ~~**`update_memory`**: 既存記憶の更新~~
+- ~~**記憶の関連付け**: `(:Memory)-[:RELATED_TO]->(:Memory)`~~
+- ~~**グラフ探索**: `explore_related` による関連記憶の発見~~
+- ~~**知識の自律的改善**: `store_memory` 時の自動リンク提案・重複検出~~
+- ~~**知識分析**: `analyze_knowledge` による健全性チェック~~
+
+### 検討中
 - **`merge_memories`**: 類似記憶の統合
-- **記憶の関連付け**: `(:Memory)-[:RELATED_TO]->(:Memory)`
 - **エクスポート/インポート**: JSONでのバックアップ・復元
 - **Web UI**: 記憶の可視化・ブラウジング
+- **記憶の鮮度管理**: 古い記憶の重要度低下・アーカイブ
+- **マルチモーダル対応**: 画像・図の埋め込みと検索
+- **自動タグ提案**: 内容からタグを自動推論
