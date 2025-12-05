@@ -325,13 +325,19 @@ class SmartDatabaseManager:
         try:
             yield conn
         finally:
-            # Close write connection to release lock
-            conn.close()
+            # Close write connection to release lock immediately
+            self.release_write_lock()
+
+    def release_write_lock(self) -> None:
+        """Release the write lock by closing the write connection.
+
+        This should be called after completing a batch of write operations
+        to allow other processes to access the database.
+        """
+        if self._write_conn is not None:
+            self._write_conn.close()
             self._write_conn = None
-            # Reconnect read connection (may have been invalidated)
-            if self._read_conn is not None:
-                self._read_conn.close()
-                self._read_conn = None
+            logger.debug("Write lock released")
 
     def close(self) -> None:
         """Close all database connections."""
