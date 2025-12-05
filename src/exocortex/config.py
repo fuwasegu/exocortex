@@ -22,6 +22,16 @@ class Config:
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dimension: int = 384
 
+    # Knowledge autonomy thresholds
+    link_suggestion_threshold: float = 0.65  # Suggest link if similarity > this
+    duplicate_detection_threshold: float = 0.90  # Potential duplicate if > this
+    contradiction_check_threshold: float = 0.70  # Check for contradiction if > this
+
+    # Limits
+    max_summary_length: int = 200
+    max_tags_per_memory: int = 20
+    stale_memory_days: int = 90
+
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables."""
