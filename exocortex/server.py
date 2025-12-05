@@ -167,7 +167,7 @@ def recall_tips() -> str:
 # =============================================================================
 
 
-@mcp.tool()
+@mcp.tool(name="exo_ping")
 def ping() -> dict[str, Any]:
     """Health check - verify Exocortex is running.
 
@@ -176,7 +176,7 @@ def ping() -> dict[str, Any]:
     return {"status": "ok", "message": "Exocortex is operational"}
 
 
-@mcp.tool()
+@mcp.tool(name="exo_store_memory")
 def store_memory(
     content: str,
     context_name: str,
@@ -242,7 +242,7 @@ def store_memory(
         return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(name="exo_recall_memories")
 def recall_memories(
     query: str,
     limit: int = 5,
@@ -300,7 +300,7 @@ def recall_memories(
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_list_memories")
 def list_memories(
     limit: int = 20,
     offset: int = 0,
@@ -359,7 +359,7 @@ def list_memories(
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_get_memory")
 def get_memory(memory_id: str) -> dict[str, Any]:
     """Get a specific memory by its ID.
 
@@ -392,7 +392,7 @@ def get_memory(memory_id: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_delete_memory")
 def delete_memory(memory_id: str) -> dict[str, Any]:
     """Delete a memory by its ID.
 
@@ -413,7 +413,7 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
     return {"success": True, "message": f"Memory '{memory_id}' deleted"}
 
 
-@mcp.tool()
+@mcp.tool(name="exo_get_stats")
 def get_stats() -> dict[str, Any]:
     """Get statistics about stored memories.
 
@@ -440,7 +440,7 @@ def get_stats() -> dict[str, Any]:
 # =============================================================================
 
 
-@mcp.tool()
+@mcp.tool(name="exo_link_memories")
 def link_memories(
     source_id: str,
     target_id: str,
@@ -492,7 +492,7 @@ def link_memories(
         }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_unlink_memories")
 def unlink_memories(source_id: str, target_id: str) -> dict[str, Any]:
     """Remove a relationship between two memories.
 
@@ -512,7 +512,7 @@ def unlink_memories(source_id: str, target_id: str) -> dict[str, Any]:
     return {"success": True, "message": "Link removed"}
 
 
-@mcp.tool()
+@mcp.tool(name="exo_get_memory_links")
 def get_memory_links(memory_id: str) -> dict[str, Any]:
     """Get all outgoing links from a memory.
 
@@ -540,7 +540,7 @@ def get_memory_links(memory_id: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_update_memory")
 def update_memory(
     memory_id: str,
     content: str | None = None,
@@ -586,7 +586,7 @@ def update_memory(
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_explore_related")
 def explore_related(
     memory_id: str,
     include_tag_siblings: bool = True,
@@ -638,7 +638,7 @@ def explore_related(
     }
 
 
-@mcp.tool()
+@mcp.tool(name="exo_analyze_knowledge")
 def analyze_knowledge() -> dict[str, Any]:
     """Analyze the knowledge base for health and improvement opportunities.
 

@@ -84,3 +84,5 @@ all_memories = self._repo.get_all_with_embeddings()
 1.  **リポジトリの分割**: `MemoryRepository` から、「分析ロジック（Analyzer）」や「テキスト処理（Summarizer）」を別クラス/別モジュールに切り出す。
 
 
+
+
