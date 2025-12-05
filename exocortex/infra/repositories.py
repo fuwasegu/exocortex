@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from ..domain.exceptions import (
@@ -13,8 +13,6 @@ from ..domain.exceptions import (
     SelfLinkError,
 )
 from ..domain.models import (
-    AnalyzeKnowledgeResult,
-    KnowledgeHealthIssue,
     MemoryLink,
     MemoryStats,
     MemoryType,
@@ -47,6 +45,20 @@ class MemoryRepository:
         self._embedding_engine = embedding_engine
         self._max_summary_length = max_summary_length
 
+    def compute_similarity(
+        self, embedding1: list[float], embedding2: list[float]
+    ) -> float:
+        """Compute similarity between two embeddings.
+
+        Args:
+            embedding1: First embedding vector.
+            embedding2: Second embedding vector.
+
+        Returns:
+            Similarity score (0 to 1).
+        """
+        return self._embedding_engine.compute_similarity(embedding1, embedding2)
+
     def _generate_summary(self, content: str) -> str:
         """Generate a summary from content."""
         content = content.strip()
@@ -59,6 +71,37 @@ class MemoryRepository:
             truncated = truncated[:last_space]
 
         return truncated + "..."
+
+    def _create_tag_relationships(
+        self, memory_id: str, tags: list[str], timestamp: datetime
+    ) -> None:
+        """Create tag nodes and relationships for a memory.
+
+        Args:
+            memory_id: The memory ID to tag.
+            tags: List of tag names.
+            timestamp: Timestamp for new tag nodes.
+        """
+        for tag in tags:
+            tag_normalized = tag.strip().lower()
+            if not tag_normalized:
+                continue
+
+            self._db.execute(
+                """
+                MERGE (t:Tag {name: $name})
+                ON CREATE SET t.created_at = $created_at
+                """,
+                parameters={"name": tag_normalized, "created_at": timestamp},
+            )
+
+            self._db.execute(
+                """
+                MATCH (m:Memory {id: $memory_id}), (t:Tag {name: $tag_name})
+                CREATE (m)-[:TAGGED_WITH]->(t)
+                """,
+                parameters={"memory_id": memory_id, "tag_name": tag_normalized},
+            )
 
     def _row_to_memory(
         self,
@@ -287,11 +330,67 @@ class MemoryRepository:
 
         return self._row_to_memory(result.get_next())
 
-    def get_all_with_embeddings(self) -> list[tuple[str, str, list[float], str, str]]:
-        """Get all memories with their embeddings.
+    def search_similar_by_embedding(
+        self,
+        embedding: list[float],
+        limit: int = 10,
+        exclude_id: str | None = None,
+    ) -> list[tuple[str, str, float, str, str | None]]:
+        """Search similar memories using KùzuDB native vector search.
+
+        Uses the vector index for efficient similarity search.
+
+        Args:
+            embedding: Query embedding vector.
+            limit: Maximum results to return.
+            exclude_id: Optional memory ID to exclude from results.
 
         Returns:
-            List of (id, summary, embedding, memory_type, context) tuples.
+            List of (id, summary, similarity, memory_type, context) tuples,
+            sorted by similarity descending.
+        """
+        # Use KùzuDB's native vector search
+        # Fetch more than needed to account for exclusions
+        fetch_limit = limit + 5 if exclude_id else limit
+
+        try:
+            result = self._db.execute(
+                """
+                CALL QUERY_VECTOR_INDEX('Memory', 'memory_embedding_idx', $embedding, $k)
+                YIELD node, distance
+                MATCH (node)
+                OPTIONAL MATCH (node)-[:ORIGINATED_IN]->(c:Context)
+                RETURN node.id, node.summary, 1 - distance as similarity,
+                       node.memory_type, c.name as context
+                ORDER BY similarity DESC
+                """,
+                parameters={"embedding": embedding, "k": fetch_limit},
+            )
+        except Exception as e:
+            # Fallback to brute-force if vector index fails
+            logger.warning(f"Vector index search failed, using fallback: {e}")
+            return self._search_similar_fallback(embedding, limit, exclude_id)
+
+        memories = []
+        while result.has_next():
+            row = result.get_next()
+            if exclude_id and row[0] == exclude_id:
+                continue
+            memories.append((row[0], row[1], row[2], row[3], row[4]))
+            if len(memories) >= limit:
+                break
+
+        return memories
+
+    def _search_similar_fallback(
+        self,
+        embedding: list[float],
+        limit: int,
+        exclude_id: str | None,
+    ) -> list[tuple[str, str, float, str, str | None]]:
+        """Fallback similarity search using Python-side computation.
+
+        Used when vector index is not available.
         """
         result = self._db.execute("""
             MATCH (m:Memory)
@@ -299,11 +398,19 @@ class MemoryRepository:
             RETURN m.id, m.summary, m.embedding, m.memory_type, c.name as context
         """)
 
-        memories = []
+        memories_with_scores: list[tuple[str, str, float, str, str | None]] = []
+
         while result.has_next():
             row = result.get_next()
-            memories.append((row[0], row[1], row[2], row[3], row[4]))
-        return memories
+            memory_id = row[0]
+            if exclude_id and memory_id == exclude_id:
+                continue
+
+            similarity = self._embedding_engine.compute_similarity(embedding, row[2])
+            memories_with_scores.append((memory_id, row[1], similarity, row[3], row[4]))
+
+        memories_with_scores.sort(key=lambda x: x[2], reverse=True)
+        return memories_with_scores[:limit]
 
     def search_by_similarity(
         self,
@@ -314,6 +421,8 @@ class MemoryRepository:
         type_filter: MemoryType | None = None,
     ) -> tuple[list[MemoryWithContext], int]:
         """Search memories by semantic similarity.
+
+        Uses KùzuDB's native vector index for efficient search.
 
         Args:
             query: Search query.
@@ -327,62 +436,39 @@ class MemoryRepository:
         """
         query_embedding = self._embedding_engine.embed(query)
 
-        result = self._db.execute("""
-            MATCH (m:Memory)
-            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
-            RETURN m.id, m.content, m.summary, m.embedding, m.memory_type,
-                   m.created_at, m.updated_at, c.name as context,
-                   collect(t.name) as tags
-        """)
+        # Fetch more candidates to account for filtering
+        fetch_multiplier = 3 if (context_filter or tag_filter or type_filter) else 1
+        candidates = self.search_similar_by_embedding(
+            embedding=query_embedding,
+            limit=limit * fetch_multiplier + 10,
+        )
 
-        memories_with_scores: list[tuple[MemoryWithContext, float]] = []
+        memories: list[MemoryWithContext] = []
 
-        while result.has_next():
-            row = result.get_next()
-            memory_id = row[0]
-            content = row[1]
-            summary = row[2]
-            embedding = row[3]
-            memory_type = row[4]
-            created_at = row[5]
-            updated_at = row[6]
-            context = row[7]
-            tags = [t for t in row[8] if t]
-
+        for memory_id, _summary, similarity, memory_type, context in candidates:
             # Apply filters
             if context_filter and context != context_filter:
                 continue
             if type_filter and memory_type != type_filter.value:
                 continue
+
+            # Get full memory with tags for tag filtering
+            full_memory = self.get_by_id(memory_id)
+            if full_memory is None:
+                continue
+
             if tag_filter:
-                tag_set = set(tags)
+                tag_set = set(full_memory.tags)
                 if not any(t.lower() in tag_set for t in tag_filter):
                     continue
 
-            similarity = self._embedding_engine.compute_similarity(
-                query_embedding, embedding
-            )
+            full_memory.similarity = similarity
+            memories.append(full_memory)
 
-            memory = MemoryWithContext(
-                id=memory_id,
-                content=content,
-                summary=summary,
-                memory_type=MemoryType(memory_type),
-                created_at=created_at,
-                updated_at=updated_at,
-                context=context,
-                tags=tags,
-                similarity=similarity,
-            )
+            if len(memories) >= limit:
+                break
 
-            memories_with_scores.append((memory, similarity))
-
-        memories_with_scores.sort(key=lambda x: x[1], reverse=True)
-        total_found = len(memories_with_scores)
-        top_memories = [m for m, _ in memories_with_scores[:limit]]
-
-        return top_memories, total_found
+        return memories, len(memories)
 
     def list_memories(
         self,
@@ -594,13 +680,15 @@ class MemoryRepository:
         Returns:
             Tuple of (success, changes, summary).
         """
-        # Get existing memory info
+        # Get existing memory info including tags
         result = self._db.execute(
             """
             MATCH (m:Memory {id: $id})
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
+            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
             RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at, c.name as context
+                   m.created_at, m.updated_at, c.name as context,
+                   collect(t.name) as tags
             """,
             parameters={"id": memory_id},
         )
@@ -613,10 +701,15 @@ class MemoryRepository:
         current_type = row[3]
         created_at = row[4]
         context_name = row[6]
+        existing_tags = [t for t in row[7] if t] if row[7] else []
 
         changes: list[str] = []
         now = datetime.now(timezone.utc)
         summary = current_summary
+
+        # Determine which tags to use
+        tags_to_apply = tags if tags is not None else existing_tags
+        tags_changed = tags is not None
 
         # If content changes, we need to delete and recreate due to vector index
         if content is not None:
@@ -634,8 +727,7 @@ class MemoryRepository:
                 parameters={"id": memory_id},
             )
             while result.has_next():
-                link_row = result.get_next()
-                outgoing_links.append(link_row)
+                outgoing_links.append(result.get_next())
 
             incoming_links = []
             result = self._db.execute(
@@ -646,30 +738,17 @@ class MemoryRepository:
                 parameters={"id": memory_id},
             )
             while result.has_next():
-                link_row = result.get_next()
-                incoming_links.append(link_row)
+                incoming_links.append(result.get_next())
 
-            # Delete the old memory node and its relationships
-            self._db.execute(
+            # Delete the old memory node and all its relationships
+            for rel_query in [
                 "MATCH (m:Memory {id: $id})-[r:ORIGINATED_IN]->(:Context) DELETE r",
-                parameters={"id": memory_id},
-            )
-            self._db.execute(
                 "MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag) DELETE r",
-                parameters={"id": memory_id},
-            )
-            self._db.execute(
                 "MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(:Memory) DELETE r",
-                parameters={"id": memory_id},
-            )
-            self._db.execute(
                 "MATCH (:Memory)-[r:RELATED_TO]->(m:Memory {id: $id}) DELETE r",
-                parameters={"id": memory_id},
-            )
-            self._db.execute(
                 "MATCH (m:Memory {id: $id}) DELETE m",
-                parameters={"id": memory_id},
-            )
+            ]:
+                self._db.execute(rel_query, parameters={"id": memory_id})
 
             # Recreate memory with new content
             self._db.execute(
@@ -704,6 +783,9 @@ class MemoryRepository:
                     """,
                     parameters={"memory_id": memory_id, "context_name": context_name},
                 )
+
+            # Re-create tags (either new or existing)
+            self._create_tag_relationships(memory_id, tags_to_apply, now)
 
             # Re-create RELATED_TO links
             for link in outgoing_links:
@@ -747,63 +829,49 @@ class MemoryRepository:
             changes.append("content")
             if memory_type is not None:
                 changes.append("memory_type")
+            if tags_changed:
+                changes.append("tags")
 
-        elif memory_type is not None:
-            # Only updating type, no embedding change needed
-            self._db.execute(
-                """
-                MATCH (m:Memory {id: $id})
-                SET m.memory_type = $memory_type,
-                    m.updated_at = $updated_at
-                """,
-                parameters={
-                    "id": memory_id,
-                    "memory_type": memory_type.value,
-                    "updated_at": now,
-                },
-            )
-            changes.append("memory_type")
-
-        if tags is not None:
-            self._db.execute(
-                """
-                MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag)
-                DELETE r
-                """,
-                parameters={"id": memory_id},
-            )
-
-            for tag in tags:
-                tag_normalized = tag.strip().lower()
-                if not tag_normalized:
-                    continue
-
+        else:
+            # No content change - can update in place
+            if memory_type is not None:
                 self._db.execute(
                     """
-                    MERGE (t:Tag {name: $name})
-                    ON CREATE SET t.created_at = $created_at
+                    MATCH (m:Memory {id: $id})
+                    SET m.memory_type = $memory_type,
+                        m.updated_at = $updated_at
                     """,
-                    parameters={"name": tag_normalized, "created_at": now},
+                    parameters={
+                        "id": memory_id,
+                        "memory_type": memory_type.value,
+                        "updated_at": now,
+                    },
                 )
+                changes.append("memory_type")
 
+            if tags_changed:
+                # Delete existing tag relationships
                 self._db.execute(
                     """
-                    MATCH (m:Memory {id: $memory_id}), (t:Tag {name: $tag_name})
-                    CREATE (m)-[:TAGGED_WITH]->(t)
+                    MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag)
+                    DELETE r
                     """,
-                    parameters={"memory_id": memory_id, "tag_name": tag_normalized},
+                    parameters={"id": memory_id},
                 )
 
-            changes.append("tags")
+                # Create new tag relationships
+                self._create_tag_relationships(memory_id, tags_to_apply, now)
+                changes.append("tags")
 
-        if changes and content is None and memory_type is None:
-            self._db.execute(
-                """
-                MATCH (m:Memory {id: $id})
-                SET m.updated_at = $updated_at
-                """,
-                parameters={"id": memory_id, "updated_at": now},
-            )
+            # Update timestamp if only tags changed
+            if changes and memory_type is None:
+                self._db.execute(
+                    """
+                    MATCH (m:Memory {id: $id})
+                    SET m.updated_at = $updated_at
+                    """,
+                    parameters={"id": memory_id, "updated_at": now},
+                )
 
         # Get updated summary if not already set
         if not summary:
@@ -879,7 +947,7 @@ class MemoryRepository:
         return True
 
     # =========================================================================
-    # Statistics and Analysis
+    # Statistics and Analysis (Data Queries)
     # =========================================================================
 
     def get_stats(self) -> MemoryStats:
@@ -921,127 +989,63 @@ class MemoryRepository:
             top_tags=top_tags,
         )
 
-    def analyze_health(self, stale_days: int = 90) -> AnalyzeKnowledgeResult:
-        """Analyze knowledge base health."""
-        issues: list[KnowledgeHealthIssue] = []
-        suggestions: list[str] = []
-        stats: dict[str, Any] = {}
+    def get_orphan_memories(self, limit: int = 10) -> list[tuple[str, str]]:
+        """Get memories without tags.
 
-        memory_stats = self.get_stats()
-        total_memories = memory_stats.total_memories
+        Args:
+            limit: Maximum number of memories to return.
 
-        if total_memories == 0:
-            return AnalyzeKnowledgeResult(
-                total_memories=0,
-                health_score=100.0,
-                issues=[],
-                suggestions=["Start storing memories to build your external brain!"],
-                stats={},
-            )
-
-        # Check for orphan memories (no tags)
-        result = self._db.execute("""
+        Returns:
+            List of (id, summary) tuples for memories without tags.
+        """
+        result = self._db.execute(
+            """
             MATCH (m:Memory)
             WHERE NOT EXISTS { MATCH (m)-[:TAGGED_WITH]->(:Tag) }
             RETURN m.id, m.summary
-        """)
-        orphan_memories: list[tuple[str, str]] = []
+            LIMIT $limit
+            """,
+            parameters={"limit": limit},
+        )
+        memories: list[tuple[str, str]] = []
         while result.has_next():
             row = result.get_next()
-            orphan_memories.append((row[0], row[1]))
+            memories.append((row[0], row[1]))
+        return memories
 
-        if orphan_memories:
-            issues.append(
-                KnowledgeHealthIssue(
-                    issue_type="orphan_memories",
-                    severity="medium",
-                    message=f"{len(orphan_memories)} memories have no tags.",
-                    affected_memory_ids=[m[0] for m in orphan_memories[:10]],
-                    suggested_action="Add tags using update_memory",
-                )
-            )
-
-        # Check for unlinked memories
+    def get_unlinked_count(self) -> int:
+        """Get count of memories without any RELATED_TO links."""
         result = self._db.execute("""
             MATCH (m:Memory)
             WHERE NOT EXISTS { MATCH (m)-[:RELATED_TO]->(:Memory) }
               AND NOT EXISTS { MATCH (:Memory)-[:RELATED_TO]->(m) }
             RETURN count(m)
         """)
-        unlinked_count = result.get_next()[0] if result.has_next() else 0
-        stats["unlinked_memories"] = unlinked_count
+        return result.get_next()[0] if result.has_next() else 0
 
-        if unlinked_count > 0 and total_memories > 5:
-            link_ratio = unlinked_count / total_memories
-            if link_ratio > 0.8:
-                issues.append(
-                    KnowledgeHealthIssue(
-                        issue_type="low_connectivity",
-                        severity="low",
-                        message=f"{unlinked_count}/{total_memories} memories have no links.",
-                        affected_memory_ids=[],
-                        suggested_action="Use explore_related and link_memories",
-                    )
-                )
+    def get_stale_memories(
+        self, threshold: datetime, limit: int = 10
+    ) -> list[tuple[str, str]]:
+        """Get memories not updated since threshold.
 
-        # Check for stale memories
-        stale_threshold = datetime.now(timezone.utc) - timedelta(days=stale_days)
+        Args:
+            threshold: Datetime threshold. Memories not updated since this time are stale.
+            limit: Maximum number of memories to return.
+
+        Returns:
+            List of (id, summary) tuples for stale memories.
+        """
         result = self._db.execute(
             """
             MATCH (m:Memory)
             WHERE m.updated_at < $threshold
             RETURN m.id, m.summary
-            LIMIT 10
+            LIMIT $limit
             """,
-            parameters={"threshold": stale_threshold},
+            parameters={"threshold": threshold, "limit": limit},
         )
-        stale_memories: list[tuple[str, str]] = []
+        memories: list[tuple[str, str]] = []
         while result.has_next():
             row = result.get_next()
-            stale_memories.append((row[0], row[1]))
-
-        if stale_memories:
-            issues.append(
-                KnowledgeHealthIssue(
-                    issue_type="stale_memories",
-                    severity="low",
-                    message=f"{len(stale_memories)}+ memories not updated in {stale_days}+ days.",
-                    affected_memory_ids=[m[0] for m in stale_memories],
-                    suggested_action="Review and update or mark as superseded",
-                )
-            )
-
-        # Calculate health score
-        health_score = 100.0
-        for issue in issues:
-            if issue.severity == "high":
-                health_score -= 20
-            elif issue.severity == "medium":
-                health_score -= 10
-            elif issue.severity == "low":
-                health_score -= 5
-
-        if unlinked_count / total_memories < 0.5:
-            health_score = min(100, health_score + 5)
-
-        health_score = max(0, health_score)
-
-        # Generate suggestions
-        if not issues:
-            suggestions.append("Your knowledge base looks healthy!")
-        else:
-            suggestions.append("Address the issues above to improve discoverability.")
-
-        if total_memories < 10:
-            suggestions.append("Keep recording insights for better semantic search.")
-
-        if memory_stats.memories_by_type.get(MemoryType.FAILURE.value, 0) == 0:
-            suggestions.append("Don't forget to record failures too!")
-
-        return AnalyzeKnowledgeResult(
-            total_memories=total_memories,
-            health_score=health_score,
-            issues=issues,
-            suggestions=suggestions,
-            stats=stats,
-        )
+            memories.append((row[0], row[1]))
+        return memories

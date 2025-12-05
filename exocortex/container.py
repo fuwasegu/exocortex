@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from .config import Config, get_config
 from .domain.services import MemoryService
 from .infra.database import DatabaseConnection
 from .infra.embeddings import EmbeddingEngine
 from .infra.repositories import MemoryRepository
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass

@@ -245,16 +245,18 @@ class TestDatabaseIntegration:
     def test_analyze_health(self, container: Container):
         """Test knowledge base health analysis."""
         repo = container.repository
+        service = container.memory_service
 
         # Create memories without tags (will trigger orphan warning)
-        m_id, _, _ = repo.create_memory(
+        repo.create_memory(
             content="Orphan memory",
             context_name="test",
             tags=[],  # No tags
             memory_type=MemoryType.NOTE,
         )
 
-        result = repo.analyze_health()
+        # Use service for health analysis
+        result = service.analyze_knowledge()
 
         assert result.total_memories >= 1
         assert 0 <= result.health_score <= 100

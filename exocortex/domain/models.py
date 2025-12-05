@@ -187,4 +187,6 @@ class AnalyzeKnowledgeResult(BaseModel):
     suggestions: list[str] = Field(
         default_factory=list, description="General improvement suggestions"
     )
-    stats: dict = Field(default_factory=dict, description="Additional statistics")
+    stats: dict[str, Any] = Field(
+        default_factory=dict, description="Additional statistics"
+    )

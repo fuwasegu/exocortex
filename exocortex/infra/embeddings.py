@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -11,29 +11,6 @@ if TYPE_CHECKING:
     from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
-
-
-class EmbeddingEngineProtocol(Protocol):
-    """Protocol for embedding engines."""
-
-    @property
-    def dimension(self) -> int:
-        """Get the embedding dimension."""
-        ...
-
-    def embed(self, text: str) -> list[float]:
-        """Embed a single text string."""
-        ...
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Embed multiple texts."""
-        ...
-
-    def compute_similarity(
-        self, embedding1: list[float], embedding2: list[float]
-    ) -> float:
-        """Compute cosine similarity between two embeddings."""
-        ...
 
 
 class EmbeddingEngine:
