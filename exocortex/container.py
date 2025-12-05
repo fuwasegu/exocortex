@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .config import Config, get_config
 from .domain.services import MemoryService
-from .infra.database import DatabaseConnection
+from .infra.database import SmartDatabaseManager
 from .infra.embeddings import EmbeddingEngine
 from .infra.repositories import MemoryRepository
 
@@ -21,7 +21,7 @@ class Container:
 
     config: Config
     _embedding_engine: EmbeddingEngine | None = None
-    _database: DatabaseConnection | None = None
+    _database_manager: SmartDatabaseManager | None = None
     _repository: MemoryRepository | None = None
     _service: MemoryService | None = None
 
@@ -47,21 +47,21 @@ class Container:
         return self._embedding_engine
 
     @property
-    def database(self) -> DatabaseConnection:
-        """Get the database connection (lazy initialization)."""
-        if self._database is None:
-            self._database = DatabaseConnection(
+    def database_manager(self) -> SmartDatabaseManager:
+        """Get the smart database manager (lazy initialization)."""
+        if self._database_manager is None:
+            self._database_manager = SmartDatabaseManager(
                 db_path=self.config.db_path,
                 embedding_dimension=self.embedding_engine.dimension,
             )
-        return self._database
+        return self._database_manager
 
     @property
     def repository(self) -> MemoryRepository:
         """Get the memory repository (lazy initialization)."""
         if self._repository is None:
             self._repository = MemoryRepository(
-                db=self.database,
+                db_manager=self.database_manager,
                 embedding_engine=self.embedding_engine,
                 max_summary_length=self.config.max_summary_length,
             )
@@ -83,9 +83,9 @@ class Container:
 
     def close(self) -> None:
         """Close all resources."""
-        if self._database is not None:
-            self._database.close()
-            self._database = None
+        if self._database_manager is not None:
+            self._database_manager.close()
+            self._database_manager = None
         self._repository = None
         self._service = None
 
