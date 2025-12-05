@@ -13,10 +13,16 @@ import kuzu
 from .config import get_config
 from .embeddings import get_embedding_engine
 from .models import (
+    AnalyzeKnowledgeResult,
+    KnowledgeHealthIssue,
+    KnowledgeInsight,
+    MemoryLink,
     MemoryStats,
     MemoryType,
     MemoryWithContext,
+    RelationType,
     StoreMemoryResult,
+    SuggestedLink,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,6 +117,16 @@ class ExocortexDB:
             )
         """)
 
+        # Create RELATED_TO relationship table for memory-to-memory links
+        self.conn.execute("""
+            CREATE REL TABLE IF NOT EXISTS RELATED_TO (
+                FROM Memory TO Memory,
+                relation_type STRING,
+                reason STRING,
+                created_at TIMESTAMP
+            )
+        """)
+
         logger.info("Database schema initialized successfully")
 
     def _create_vector_index(self) -> None:
@@ -158,6 +174,7 @@ class ExocortexDB:
         context_name: str,
         tags: list[str],
         memory_type: MemoryType = MemoryType.INSIGHT,
+        auto_analyze: bool = True,
     ) -> StoreMemoryResult:
         """Store a new memory.
 
@@ -166,9 +183,10 @@ class ExocortexDB:
             context_name: Associated context/project.
             tags: Associated tags.
             memory_type: Type of memory.
+            auto_analyze: Whether to analyze for similar memories and suggestions.
 
         Returns:
-            StoreMemoryResult with success status and memory ID.
+            StoreMemoryResult with success status, memory ID, and knowledge insights.
         """
         memory_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
@@ -244,11 +262,231 @@ class ExocortexDB:
 
         logger.info(f"Stored memory {memory_id} with {len(tags)} tags")
 
+        # Auto-analyze for knowledge improvement suggestions
+        suggested_links: list[SuggestedLink] = []
+        insights: list[KnowledgeInsight] = []
+
+        if auto_analyze:
+            suggested_links, insights = self._analyze_new_memory(
+                memory_id, content, embedding, memory_type, embedding_engine
+            )
+
         return StoreMemoryResult(
             success=True,
             memory_id=memory_id,
             summary=summary,
+            suggested_links=suggested_links,
+            insights=insights,
         )
+
+    def _analyze_new_memory(
+        self,
+        new_memory_id: str,
+        content: str,
+        embedding: list[float],
+        memory_type: MemoryType,
+        embedding_engine: Any,
+    ) -> tuple[list[SuggestedLink], list[KnowledgeInsight]]:
+        """Analyze a new memory for potential links and insights.
+
+        Args:
+            new_memory_id: ID of the newly created memory.
+            content: Content of the new memory.
+            embedding: Embedding vector of the new memory.
+            memory_type: Type of the new memory.
+            embedding_engine: Embedding engine for similarity computation.
+
+        Returns:
+            Tuple of (suggested_links, insights).
+        """
+        suggested_links: list[SuggestedLink] = []
+        insights: list[KnowledgeInsight] = []
+
+        # Thresholds
+        LINK_THRESHOLD = 0.65  # Suggest link if similarity > this
+        DUPLICATE_THRESHOLD = 0.90  # Potential duplicate if > this
+        CONTRADICTION_KEYWORDS = ["but", "however", "instead", "wrong", "incorrect", "not", "don't", "shouldn't"]
+
+        # Get all other memories with embeddings
+        result = self.conn.execute("""
+            MATCH (m:Memory)
+            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
+            RETURN m.id, m.summary, m.embedding, m.memory_type, c.name as context
+        """)
+
+        similar_memories: list[tuple[str, str, float, str, str]] = []  # id, summary, similarity, type, context
+
+        while result.has_next():
+            row = result.get_next()
+            other_id = row[0]
+            other_summary = row[1]
+            other_embedding = row[2]
+            other_type = row[3]
+            other_context = row[4]
+
+            if other_id == new_memory_id:
+                continue
+
+            similarity = embedding_engine.compute_similarity(embedding, other_embedding)
+            if similarity > LINK_THRESHOLD:
+                similar_memories.append((other_id, other_summary, similarity, other_type, other_context))
+
+        # Sort by similarity
+        similar_memories.sort(key=lambda x: x[2], reverse=True)
+
+        # Analyze similar memories
+        for other_id, other_summary, similarity, other_type, other_context in similar_memories[:5]:
+            # Check for potential duplicate
+            if similarity > DUPLICATE_THRESHOLD:
+                insights.append(
+                    KnowledgeInsight(
+                        insight_type="potential_duplicate",
+                        message=f"This memory is very similar ({similarity:.0%}) to an existing one. Consider updating instead of creating new.",
+                        related_memory_id=other_id,
+                        related_memory_summary=other_summary,
+                        confidence=similarity,
+                        suggested_action=f"Use update_memory on '{other_id}' or link with 'supersedes' relation",
+                    )
+                )
+            else:
+                # Suggest link based on relationship patterns
+                suggested_relation = self._infer_relation_type(
+                    memory_type, other_type, content, other_summary
+                )
+                reason = self._generate_link_reason(
+                    memory_type, other_type, similarity, other_context
+                )
+
+                suggested_links.append(
+                    SuggestedLink(
+                        target_id=other_id,
+                        target_summary=other_summary or "",
+                        similarity=similarity,
+                        suggested_relation=suggested_relation,
+                        reason=reason,
+                    )
+                )
+
+        # Check for potential contradictions (heuristic)
+        content_lower = content.lower()
+        has_contradiction_signals = any(kw in content_lower for kw in CONTRADICTION_KEYWORDS)
+
+        if has_contradiction_signals and similar_memories:
+            top_similar = similar_memories[0]
+            if top_similar[2] > 0.7:  # Only if quite similar
+                insights.append(
+                    KnowledgeInsight(
+                        insight_type="potential_contradiction",
+                        message="This memory may contradict or update existing knowledge. Please verify.",
+                        related_memory_id=top_similar[0],
+                        related_memory_summary=top_similar[1],
+                        confidence=0.6,  # Heuristic-based, lower confidence
+                        suggested_action="Review and consider linking with 'supersedes' or 'contradicts' relation",
+                    )
+                )
+
+        # Insight: Suggest pattern-based improvements
+        if memory_type == MemoryType.SUCCESS:
+            # Check if there's a related failure that this might resolve
+            for other_id, other_summary, similarity, other_type, _ in similar_memories:
+                if other_type == MemoryType.FAILURE.value and similarity > 0.6:
+                    insights.append(
+                        KnowledgeInsight(
+                            insight_type="success_after_failure",
+                            message="This success may be a solution to a previously recorded failure.",
+                            related_memory_id=other_id,
+                            related_memory_summary=other_summary,
+                            confidence=similarity,
+                            suggested_action=f"Link to failure '{other_id}' with 'extends' relation to document the solution",
+                        )
+                    )
+                    break
+
+        return suggested_links, insights
+
+    def _infer_relation_type(
+        self,
+        new_type: MemoryType,
+        existing_type: str,
+        new_content: str,
+        existing_summary: str,
+    ) -> RelationType:
+        """Infer the most likely relation type between two memories.
+
+        Args:
+            new_type: Type of the new memory.
+            existing_type: Type of the existing memory.
+            new_content: Content of the new memory.
+            existing_summary: Summary of the existing memory.
+
+        Returns:
+            Suggested RelationType.
+        """
+        new_content_lower = new_content.lower()
+
+        # Pattern: Success extending/resolving insight or failure
+        if new_type == MemoryType.SUCCESS:
+            if existing_type in [MemoryType.INSIGHT.value, MemoryType.DECISION.value]:
+                return RelationType.EXTENDS
+            if existing_type == MemoryType.FAILURE.value:
+                return RelationType.EXTENDS  # Solution to a problem
+
+        # Pattern: Decision based on insight
+        if new_type == MemoryType.DECISION:
+            if existing_type == MemoryType.INSIGHT.value:
+                return RelationType.DEPENDS_ON
+
+        # Pattern: Content suggests superseding
+        supersede_keywords = ["updated", "new version", "replaces", "improved", "better approach"]
+        if any(kw in new_content_lower for kw in supersede_keywords):
+            return RelationType.SUPERSEDES
+
+        # Pattern: Content suggests contradiction
+        contradict_keywords = ["wrong", "incorrect", "actually", "contrary", "opposite"]
+        if any(kw in new_content_lower for kw in contradict_keywords):
+            return RelationType.CONTRADICTS
+
+        # Default to general relation
+        return RelationType.RELATED
+
+    def _generate_link_reason(
+        self,
+        new_type: MemoryType,
+        existing_type: str,
+        similarity: float,
+        existing_context: str | None,
+    ) -> str:
+        """Generate a human-readable reason for a suggested link.
+
+        Args:
+            new_type: Type of the new memory.
+            existing_type: Type of the existing memory.
+            similarity: Similarity score.
+            existing_context: Context of the existing memory.
+
+        Returns:
+            Reason string.
+        """
+        reasons = []
+
+        if similarity > 0.85:
+            reasons.append("Very high semantic similarity")
+        elif similarity > 0.75:
+            reasons.append("High semantic similarity")
+        else:
+            reasons.append("Moderate semantic similarity")
+
+        if new_type == MemoryType.SUCCESS and existing_type == MemoryType.FAILURE.value:
+            reasons.append("may be a solution to the recorded failure")
+        elif new_type == MemoryType.SUCCESS and existing_type == MemoryType.INSIGHT.value:
+            reasons.append("may be an application of this insight")
+        elif new_type == MemoryType.DECISION and existing_type == MemoryType.INSIGHT.value:
+            reasons.append("decision may be based on this insight")
+
+        if existing_context:
+            reasons.append(f"from project '{existing_context}'")
+
+        return "; ".join(reasons)
 
     def recall_memories(
         self,
@@ -495,6 +733,22 @@ class ExocortexDB:
             parameters={"id": memory_id},
         )
 
+        # Delete RELATED_TO relationships (both directions)
+        self.conn.execute(
+            """
+            MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(:Memory)
+            DELETE r
+            """,
+            parameters={"id": memory_id},
+        )
+        self.conn.execute(
+            """
+            MATCH (:Memory)-[r:RELATED_TO]->(m:Memory {id: $id})
+            DELETE r
+            """,
+            parameters={"id": memory_id},
+        )
+
         # Delete memory node
         self.conn.execute(
             """
@@ -553,6 +807,574 @@ class ExocortexDB:
             total_contexts=total_contexts,
             total_tags=total_tags,
             top_tags=top_tags,
+        )
+
+    def link_memories(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: RelationType,
+        reason: str | None = None,
+    ) -> bool:
+        """Create a link between two memories.
+
+        Args:
+            source_id: Source memory ID.
+            target_id: Target memory ID.
+            relation_type: Type of relationship.
+            reason: Optional reason for the link.
+
+        Returns:
+            True if link created, False if memories not found.
+        """
+        # Check both memories exist
+        result = self.conn.execute(
+            """
+            MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
+            RETURN s.id, t.id
+            """,
+            parameters={"source_id": source_id, "target_id": target_id},
+        )
+
+        if not result.has_next():
+            return False
+
+        now = datetime.now(timezone.utc)
+
+        # Create the relationship
+        self.conn.execute(
+            """
+            MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
+            CREATE (s)-[:RELATED_TO {
+                relation_type: $relation_type,
+                reason: $reason,
+                created_at: $created_at
+            }]->(t)
+            """,
+            parameters={
+                "source_id": source_id,
+                "target_id": target_id,
+                "relation_type": relation_type.value,
+                "reason": reason or "",
+                "created_at": now,
+            },
+        )
+
+        logger.info(f"Linked memory {source_id} -> {target_id} ({relation_type.value})")
+        return True
+
+    def unlink_memories(self, source_id: str, target_id: str) -> bool:
+        """Remove a link between two memories.
+
+        Args:
+            source_id: Source memory ID.
+            target_id: Target memory ID.
+
+        Returns:
+            True if link removed, False if not found.
+        """
+        # Check if link exists
+        result = self.conn.execute(
+            """
+            MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
+            RETURN r
+            """,
+            parameters={"source_id": source_id, "target_id": target_id},
+        )
+
+        if not result.has_next():
+            return False
+
+        # Delete the relationship
+        self.conn.execute(
+            """
+            MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
+            DELETE r
+            """,
+            parameters={"source_id": source_id, "target_id": target_id},
+        )
+
+        logger.info(f"Unlinked memory {source_id} -> {target_id}")
+        return True
+
+    def update_memory(
+        self,
+        memory_id: str,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        memory_type: MemoryType | None = None,
+    ) -> tuple[bool, list[str]]:
+        """Update an existing memory.
+
+        Args:
+            memory_id: Memory ID to update.
+            content: New content (updates embedding and summary too).
+            tags: New tags (replaces existing tags).
+            memory_type: New memory type.
+
+        Returns:
+            Tuple of (success, list of changes made).
+        """
+        # Check memory exists
+        result = self.conn.execute(
+            "MATCH (m:Memory {id: $id}) RETURN m.id",
+            parameters={"id": memory_id},
+        )
+
+        if not result.has_next():
+            return False, []
+
+        changes: list[str] = []
+        now = datetime.now(timezone.utc)
+
+        # Update content (and re-embed)
+        if content is not None:
+            embedding_engine = get_embedding_engine()
+            embedding = embedding_engine.embed(content)
+            summary = self._generate_summary(content)
+
+            self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})
+                SET m.content = $content,
+                    m.summary = $summary,
+                    m.embedding = $embedding,
+                    m.updated_at = $updated_at
+                """,
+                parameters={
+                    "id": memory_id,
+                    "content": content,
+                    "summary": summary,
+                    "embedding": embedding,
+                    "updated_at": now,
+                },
+            )
+            changes.append("content")
+
+        # Update memory type
+        if memory_type is not None:
+            self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})
+                SET m.memory_type = $memory_type,
+                    m.updated_at = $updated_at
+                """,
+                parameters={
+                    "id": memory_id,
+                    "memory_type": memory_type.value,
+                    "updated_at": now,
+                },
+            )
+            changes.append("memory_type")
+
+        # Update tags (replace all)
+        if tags is not None:
+            # Delete existing tag relationships
+            self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag)
+                DELETE r
+                """,
+                parameters={"id": memory_id},
+            )
+
+            # Create new tag relationships
+            for tag in tags:
+                tag_normalized = tag.strip().lower()
+                if not tag_normalized:
+                    continue
+
+                self.conn.execute(
+                    """
+                    MERGE (t:Tag {name: $name})
+                    ON CREATE SET t.created_at = $created_at
+                    """,
+                    parameters={"name": tag_normalized, "created_at": now},
+                )
+
+                self.conn.execute(
+                    """
+                    MATCH (m:Memory {id: $memory_id}), (t:Tag {name: $tag_name})
+                    CREATE (m)-[:TAGGED_WITH]->(t)
+                    """,
+                    parameters={"memory_id": memory_id, "tag_name": tag_normalized},
+                )
+
+            changes.append("tags")
+
+        # Update timestamp if anything changed
+        if changes and content is None and memory_type is None:
+            self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})
+                SET m.updated_at = $updated_at
+                """,
+                parameters={"id": memory_id, "updated_at": now},
+            )
+
+        logger.info(f"Updated memory {memory_id}: {changes}")
+        return True, changes
+
+    def get_memory_links(self, memory_id: str) -> list[MemoryLink]:
+        """Get all links from a memory.
+
+        Args:
+            memory_id: Memory ID.
+
+        Returns:
+            List of MemoryLink objects.
+        """
+        result = self.conn.execute(
+            """
+            MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(t:Memory)
+            RETURN t.id, t.summary, r.relation_type, r.reason, r.created_at
+            """,
+            parameters={"id": memory_id},
+        )
+
+        links: list[MemoryLink] = []
+        while result.has_next():
+            row = result.get_next()
+            links.append(
+                MemoryLink(
+                    target_id=row[0],
+                    target_summary=row[1],
+                    relation_type=RelationType(row[2]),
+                    reason=row[3] if row[3] else None,
+                    created_at=row[4],
+                )
+            )
+
+        return links
+
+    def explore_related(
+        self,
+        memory_id: str,
+        include_tag_siblings: bool = True,
+        include_context_siblings: bool = True,
+        max_per_category: int = 5,
+    ) -> dict[str, list[MemoryWithContext]]:
+        """Explore memories related to a given memory through graph traversal.
+
+        Args:
+            memory_id: Center memory ID.
+            include_tag_siblings: Include memories with same tags.
+            include_context_siblings: Include memories in same context.
+            max_per_category: Maximum results per category.
+
+        Returns:
+            Dictionary with 'linked', 'by_tag', 'by_context' keys.
+        """
+        result_dict: dict[str, list[MemoryWithContext]] = {
+            "linked": [],
+            "by_tag": [],
+            "by_context": [],
+        }
+
+        # Get directly linked memories
+        result = self.conn.execute(
+            """
+            MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(linked:Memory)
+            OPTIONAL MATCH (linked)-[:ORIGINATED_IN]->(c:Context)
+            OPTIONAL MATCH (linked)-[:TAGGED_WITH]->(t:Tag)
+            RETURN linked.id, linked.content, linked.summary, linked.memory_type,
+                   linked.created_at, linked.updated_at, c.name,
+                   collect(t.name) as tags, r.relation_type, r.reason
+            LIMIT $limit
+            """,
+            parameters={"id": memory_id, "limit": max_per_category},
+        )
+
+        while result.has_next():
+            row = result.get_next()
+            tags = [t for t in row[7] if t]
+            memory = MemoryWithContext(
+                id=row[0],
+                content=row[1],
+                summary=row[2],
+                memory_type=MemoryType(row[3]),
+                created_at=row[4],
+                updated_at=row[5],
+                context=row[6],
+                tags=tags,
+                related_memories=[
+                    MemoryLink(
+                        target_id=memory_id,
+                        relation_type=RelationType(row[8]),
+                        reason=row[9] if row[9] else None,
+                    )
+                ],
+            )
+            result_dict["linked"].append(memory)
+
+        # Get memories with same tags (tag siblings)
+        if include_tag_siblings:
+            result = self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})-[:TAGGED_WITH]->(t:Tag)<-[:TAGGED_WITH]-(sibling:Memory)
+                WHERE m <> sibling
+                OPTIONAL MATCH (sibling)-[:ORIGINATED_IN]->(c:Context)
+                OPTIONAL MATCH (sibling)-[:TAGGED_WITH]->(st:Tag)
+                WITH sibling, c, collect(DISTINCT t.name) as shared_tags,
+                     collect(DISTINCT st.name) as all_tags
+                RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
+                       sibling.created_at, sibling.updated_at, c.name, all_tags, shared_tags
+                ORDER BY size(shared_tags) DESC
+                LIMIT $limit
+                """,
+                parameters={"id": memory_id, "limit": max_per_category},
+            )
+
+            seen_ids = {m.id for m in result_dict["linked"]}
+            while result.has_next():
+                row = result.get_next()
+                if row[0] in seen_ids:
+                    continue
+                tags = [t for t in row[7] if t]
+                memory = MemoryWithContext(
+                    id=row[0],
+                    content=row[1],
+                    summary=row[2],
+                    memory_type=MemoryType(row[3]),
+                    created_at=row[4],
+                    updated_at=row[5],
+                    context=row[6],
+                    tags=tags,
+                )
+                result_dict["by_tag"].append(memory)
+                seen_ids.add(row[0])
+
+        # Get memories in same context
+        if include_context_siblings:
+            result = self.conn.execute(
+                """
+                MATCH (m:Memory {id: $id})-[:ORIGINATED_IN]->(c:Context)<-[:ORIGINATED_IN]-(sibling:Memory)
+                WHERE m <> sibling
+                OPTIONAL MATCH (sibling)-[:TAGGED_WITH]->(t:Tag)
+                RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
+                       sibling.created_at, sibling.updated_at, c.name,
+                       collect(t.name) as tags
+                ORDER BY sibling.created_at DESC
+                LIMIT $limit
+                """,
+                parameters={"id": memory_id, "limit": max_per_category},
+            )
+
+            seen_ids = {m.id for m in result_dict["linked"]}
+            seen_ids.update(m.id for m in result_dict["by_tag"])
+            while result.has_next():
+                row = result.get_next()
+                if row[0] in seen_ids:
+                    continue
+                tags = [t for t in row[7] if t]
+                memory = MemoryWithContext(
+                    id=row[0],
+                    content=row[1],
+                    summary=row[2],
+                    memory_type=MemoryType(row[3]),
+                    created_at=row[4],
+                    updated_at=row[5],
+                    context=row[6],
+                    tags=tags,
+                )
+                result_dict["by_context"].append(memory)
+
+        return result_dict
+
+    def analyze_knowledge(self) -> AnalyzeKnowledgeResult:
+        """Analyze the knowledge base for health issues and improvement opportunities.
+
+        Returns:
+            AnalyzeKnowledgeResult with health score, issues, and suggestions.
+        """
+        issues: list[KnowledgeHealthIssue] = []
+        suggestions: list[str] = []
+        stats: dict[str, Any] = {}
+
+        # Get basic stats
+        memory_stats = self.get_stats()
+        total_memories = memory_stats.total_memories
+
+        if total_memories == 0:
+            return AnalyzeKnowledgeResult(
+                total_memories=0,
+                health_score=100.0,
+                issues=[],
+                suggestions=["Start storing memories to build your external brain!"],
+                stats={},
+            )
+
+        # Issue 1: Orphan memories (no tags)
+        result = self.conn.execute("""
+            MATCH (m:Memory)
+            WHERE NOT EXISTS { MATCH (m)-[:TAGGED_WITH]->(:Tag) }
+            RETURN m.id, m.summary
+        """)
+        orphan_memories: list[tuple[str, str]] = []
+        while result.has_next():
+            row = result.get_next()
+            orphan_memories.append((row[0], row[1]))
+
+        if orphan_memories:
+            issues.append(
+                KnowledgeHealthIssue(
+                    issue_type="orphan_memories",
+                    severity="medium",
+                    message=f"{len(orphan_memories)} memories have no tags, making them harder to discover.",
+                    affected_memory_ids=[m[0] for m in orphan_memories[:10]],
+                    suggested_action="Add tags to these memories using update_memory",
+                )
+            )
+
+        # Issue 2: Unlinked memories (no RELATED_TO connections)
+        result = self.conn.execute("""
+            MATCH (m:Memory)
+            WHERE NOT EXISTS { MATCH (m)-[:RELATED_TO]->(:Memory) }
+              AND NOT EXISTS { MATCH (:Memory)-[:RELATED_TO]->(m) }
+            RETURN count(m)
+        """)
+        unlinked_count = result.get_next()[0] if result.has_next() else 0
+        stats["unlinked_memories"] = unlinked_count
+
+        if unlinked_count > 0 and total_memories > 5:
+            link_ratio = unlinked_count / total_memories
+            if link_ratio > 0.8:
+                issues.append(
+                    KnowledgeHealthIssue(
+                        issue_type="low_connectivity",
+                        severity="low",
+                        message=f"{unlinked_count}/{total_memories} memories have no explicit links. "
+                                "Consider linking related memories to build a knowledge graph.",
+                        affected_memory_ids=[],
+                        suggested_action="Use explore_related to find connections, then link_memories to connect them",
+                    )
+                )
+
+        # Issue 3: Stale memories (not updated in long time, heuristic)
+        # Skip stale check for now - KùzuDB date arithmetic is version-dependent
+        # In production, could compare against a threshold date passed as parameter
+        stale_threshold = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        # Subtract ~90 days
+        import calendar
+        month = stale_threshold.month - 3
+        year = stale_threshold.year
+        if month <= 0:
+            month += 12
+            year -= 1
+        stale_threshold = stale_threshold.replace(year=year, month=month)
+
+        result = self.conn.execute(
+            """
+            MATCH (m:Memory)
+            WHERE m.updated_at < $threshold
+            RETURN m.id, m.summary
+            LIMIT 10
+            """,
+            parameters={"threshold": stale_threshold},
+        )
+        stale_memories: list[tuple[str, str]] = []
+        while result.has_next():
+            row = result.get_next()
+            stale_memories.append((row[0], row[1]))
+
+        if stale_memories:
+            issues.append(
+                KnowledgeHealthIssue(
+                    issue_type="stale_memories",
+                    severity="low",
+                    message=f"{len(stale_memories)}+ memories haven't been updated in 90+ days. "
+                            "They may need review.",
+                    affected_memory_ids=[m[0] for m in stale_memories],
+                    suggested_action="Review these memories and update or mark as superseded if outdated",
+                )
+            )
+
+        # Issue 4: Tag normalization issues (similar tags)
+        result = self.conn.execute("""
+            MATCH (t:Tag)
+            RETURN t.name
+        """)
+        all_tags: list[str] = []
+        while result.has_next():
+            all_tags.append(result.get_next()[0])
+
+        # Simple heuristic: check for potential duplicates
+        similar_tags: list[tuple[str, str]] = []
+        for i, tag1 in enumerate(all_tags):
+            for tag2 in all_tags[i + 1:]:
+                # Check if one is substring of other or very similar
+                if tag1 in tag2 or tag2 in tag1:
+                    similar_tags.append((tag1, tag2))
+                elif len(tag1) > 3 and len(tag2) > 3:
+                    # Simple Levenshtein-like check
+                    if abs(len(tag1) - len(tag2)) <= 2:
+                        common = sum(1 for a, b in zip(tag1, tag2) if a == b)
+                        if common / max(len(tag1), len(tag2)) > 0.8:
+                            similar_tags.append((tag1, tag2))
+
+        if similar_tags:
+            issues.append(
+                KnowledgeHealthIssue(
+                    issue_type="similar_tags",
+                    severity="low",
+                    message=f"Found {len(similar_tags)} pairs of similar tags that might be duplicates: "
+                            f"{similar_tags[:3]}",
+                    affected_memory_ids=[],
+                    suggested_action="Consider standardizing tags by updating memories with consistent tag names",
+                )
+            )
+
+        # Issue 5: Context distribution imbalance
+        result = self.conn.execute("""
+            MATCH (m:Memory)-[:ORIGINATED_IN]->(c:Context)
+            RETURN c.name, count(m) as count
+            ORDER BY count DESC
+        """)
+        context_counts: list[tuple[str, int]] = []
+        while result.has_next():
+            row = result.get_next()
+            context_counts.append((row[0], row[1]))
+
+        stats["memories_per_context"] = dict(context_counts)
+
+        # Calculate health score
+        health_score = 100.0
+
+        # Penalize for issues
+        for issue in issues:
+            if issue.severity == "high":
+                health_score -= 20
+            elif issue.severity == "medium":
+                health_score -= 10
+            elif issue.severity == "low":
+                health_score -= 5
+
+        # Bonus for good practices
+        if unlinked_count / total_memories < 0.5:
+            health_score = min(100, health_score + 5)
+
+        health_score = max(0, health_score)
+
+        # Generate suggestions
+        if not issues:
+            suggestions.append("Your knowledge base looks healthy! Keep building your external brain.")
+        else:
+            suggestions.append("Address the issues above to improve knowledge discoverability.")
+
+        if total_memories < 10:
+            suggestions.append("Keep recording insights - the more memories, the more useful semantic search becomes.")
+
+        if memory_stats.memories_by_type.get(MemoryType.FAILURE.value, 0) == 0:
+            suggestions.append("Don't forget to record failures too - they're valuable learning opportunities!")
+
+        return AnalyzeKnowledgeResult(
+            total_memories=total_memories,
+            health_score=health_score,
+            issues=issues,
+            suggestions=suggestions,
+            stats=stats,
         )
 
     def close(self) -> None:
