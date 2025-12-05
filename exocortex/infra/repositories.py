@@ -77,6 +77,7 @@ class MemoryRepository:
         """Execute a write query using read-write connection.
 
         For smart manager, this uses the write context with retry logic.
+        Note: Call _release_write_lock() after completing all writes in a batch.
         """
         if self._use_smart_manager:
             write_conn = self._db_manager.get_write_connection()  # type: ignore
@@ -88,6 +89,15 @@ class MemoryRepository:
             if parameters:
                 return self._db_manager.execute(query, parameters=parameters)  # type: ignore
             return self._db_manager.execute(query)  # type: ignore
+
+    def _release_write_lock(self) -> None:
+        """Release the write lock after completing write operations.
+
+        This allows other processes to access the database immediately
+        after write operations complete.
+        """
+        if self._use_smart_manager:
+            self._db_manager.release_write_lock()  # type: ignore
 
     def compute_similarity(
         self, embedding1: list[float], embedding2: list[float]
@@ -277,6 +287,9 @@ class MemoryRepository:
                 parameters={"memory_id": memory_id, "tag_name": tag_normalized},
             )
 
+        # Release write lock immediately after completing all writes
+        self._release_write_lock()
+
         logger.info(f"Created memory {memory_id} with {len(tags)} tags")
         return memory_id, summary, embedding
 
@@ -348,6 +361,9 @@ class MemoryRepository:
                 "created_at": now,
             },
         )
+
+        # Release write lock immediately
+        self._release_write_lock()
 
         logger.info(f"Linked memory {source_id} -> {target_id} ({relation_type.value})")
 
@@ -917,6 +933,9 @@ class MemoryRepository:
                     parameters={"id": memory_id, "updated_at": now},
                 )
 
+        # Release write lock immediately
+        self._release_write_lock()
+
         # Get updated summary if not already set
         if not summary:
             memory = self.get_by_id(memory_id)
@@ -963,6 +982,9 @@ class MemoryRepository:
             parameters={"id": memory_id},
         )
 
+        # Release write lock immediately
+        self._release_write_lock()
+
         logger.info(f"Deleted memory {memory_id}")
         return True
 
@@ -986,6 +1008,9 @@ class MemoryRepository:
             """,
             parameters={"source_id": source_id, "target_id": target_id},
         )
+
+        # Release write lock immediately
+        self._release_write_lock()
 
         logger.info(f"Unlinked memory {source_id} -> {target_id}")
         return True
