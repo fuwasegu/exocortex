@@ -590,15 +590,12 @@ def explore_related(
     """
     container = get_container()
 
-    try:
-        result = container.memory_service.explore_related(
-            memory_id=memory_id,
-            include_tag_siblings=include_tag_siblings,
-            include_context_siblings=include_context_siblings,
-            max_per_category=max_per_category,
-        )
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    result = container.memory_service.explore_related(
+        memory_id=memory_id,
+        include_tag_siblings=include_tag_siblings,
+        include_context_siblings=include_context_siblings,
+        max_per_category=max_per_category,
+    )
 
     def format_memory(m):
         return {

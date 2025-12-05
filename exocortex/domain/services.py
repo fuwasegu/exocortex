@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
 from .exceptions import ValidationError
 from .models import (
     AnalyzeKnowledgeResult,
+    KnowledgeHealthIssue,
     KnowledgeInsight,
     MemoryLink,
     MemoryStats,
@@ -119,7 +121,10 @@ class MemoryService:
         embedding: list[float],
         memory_type: MemoryType,
     ) -> tuple[list[SuggestedLink], list[KnowledgeInsight]]:
-        """Analyze a new memory for potential links and insights."""
+        """Analyze a new memory for potential links and insights.
+
+        Uses KùzuDB's native vector search for efficient similarity lookup.
+        """
         suggested_links: list[SuggestedLink] = []
         insights: list[KnowledgeInsight] = []
 
@@ -136,30 +141,20 @@ class MemoryService:
             "contrary",
         ]
 
-        # Get all memories with embeddings
-        all_memories = self._repo.get_all_with_embeddings()
+        # Use native vector search to find similar memories efficiently
+        # Fetch top 10 similar memories (excluding the new one)
+        similar_memories = self._repo.search_similar_by_embedding(
+            embedding=embedding,
+            limit=10,
+            exclude_id=new_memory_id,
+        )
 
-        similar_memories: list[tuple[str, str, float, str, str]] = []
-
-        for (
-            other_id,
-            other_summary,
-            other_embedding,
-            other_type,
-            other_context,
-        ) in all_memories:
-            if other_id == new_memory_id:
-                continue
-
-            similarity = self._repo._embedding_engine.compute_similarity(
-                embedding, other_embedding
-            )
-            if similarity > self._link_threshold:
-                similar_memories.append(
-                    (other_id, other_summary, similarity, other_type, other_context)
-                )
-
-        similar_memories.sort(key=lambda x: x[2], reverse=True)
+        # Filter by link threshold
+        similar_memories = [
+            (mid, summary, sim, mtype, ctx)
+            for mid, summary, sim, mtype, ctx in similar_memories
+            if sim > self._link_threshold
+        ]
 
         for (
             other_id,
@@ -407,5 +402,135 @@ class MemoryService:
         return self._repo.get_stats()
 
     def analyze_knowledge(self) -> AnalyzeKnowledgeResult:
-        """Analyze the knowledge base for health issues."""
-        return self._repo.analyze_health(stale_days=self._stale_days)
+        """Analyze the knowledge base for health issues.
+
+        Performs comprehensive health analysis including:
+        - Orphan memories (no tags)
+        - Unlinked memories (no RELATED_TO connections)
+        - Stale memories (not updated recently)
+        - Overall health score calculation
+        """
+        issues: list[KnowledgeHealthIssue] = []
+        suggestions: list[str] = []
+        stats: dict[str, Any] = {}
+
+        memory_stats = self._repo.get_stats()
+        total_memories = memory_stats.total_memories
+
+        if total_memories == 0:
+            return AnalyzeKnowledgeResult(
+                total_memories=0,
+                health_score=100.0,
+                issues=[],
+                suggestions=["Start storing memories to build your external brain!"],
+                stats={},
+            )
+
+        # Check for orphan memories (no tags)
+        orphan_memories = self._repo.get_orphan_memories(limit=10)
+        if orphan_memories:
+            issues.append(
+                KnowledgeHealthIssue(
+                    issue_type="orphan_memories",
+                    severity="medium",
+                    message=f"{len(orphan_memories)} memories have no tags.",
+                    affected_memory_ids=[m[0] for m in orphan_memories],
+                    suggested_action="Add tags using update_memory",
+                )
+            )
+
+        # Check for unlinked memories
+        unlinked_count = self._repo.get_unlinked_count()
+        stats["unlinked_memories"] = unlinked_count
+
+        if unlinked_count > 0 and total_memories > 5:
+            link_ratio = unlinked_count / total_memories
+            if link_ratio > 0.8:
+                issues.append(
+                    KnowledgeHealthIssue(
+                        issue_type="low_connectivity",
+                        severity="low",
+                        message=f"{unlinked_count}/{total_memories} memories have no links.",
+                        affected_memory_ids=[],
+                        suggested_action="Use explore_related and link_memories",
+                    )
+                )
+
+        # Check for stale memories
+        stale_threshold = datetime.now(timezone.utc) - timedelta(days=self._stale_days)
+        stale_memories = self._repo.get_stale_memories(
+            threshold=stale_threshold, limit=10
+        )
+
+        if stale_memories:
+            issues.append(
+                KnowledgeHealthIssue(
+                    issue_type="stale_memories",
+                    severity="low",
+                    message=f"{len(stale_memories)}+ memories not updated in {self._stale_days}+ days.",
+                    affected_memory_ids=[m[0] for m in stale_memories],
+                    suggested_action="Review and update or mark as superseded",
+                )
+            )
+
+        # Calculate health score
+        health_score = self._calculate_health_score(
+            issues, unlinked_count, total_memories
+        )
+
+        # Generate suggestions
+        suggestions = self._generate_health_suggestions(
+            issues, total_memories, memory_stats
+        )
+
+        return AnalyzeKnowledgeResult(
+            total_memories=total_memories,
+            health_score=health_score,
+            issues=issues,
+            suggestions=suggestions,
+            stats=stats,
+        )
+
+    def _calculate_health_score(
+        self,
+        issues: list[KnowledgeHealthIssue],
+        unlinked_count: int,
+        total_memories: int,
+    ) -> float:
+        """Calculate overall health score based on issues."""
+        health_score = 100.0
+        for issue in issues:
+            if issue.severity == "high":
+                health_score -= 20
+            elif issue.severity == "medium":
+                health_score -= 10
+            elif issue.severity == "low":
+                health_score -= 5
+
+        # Bonus for good link coverage
+        if total_memories > 0 and unlinked_count / total_memories < 0.5:
+            health_score = min(100, health_score + 5)
+
+        return max(0, health_score)
+
+    def _generate_health_suggestions(
+        self,
+        issues: list[KnowledgeHealthIssue],
+        total_memories: int,
+        memory_stats: MemoryStats,
+    ) -> list[str]:
+        """Generate improvement suggestions based on health analysis."""
+        suggestions: list[str] = []
+
+        if not issues:
+            suggestions.append("Your knowledge base looks healthy!")
+        else:
+            suggestions.append("Address the issues above to improve discoverability.")
+
+        if total_memories < 10:
+            suggestions.append("Keep recording insights for better semantic search.")
+
+        if memory_stats.memories_by_type.get(MemoryType.FAILURE.value, 0) == 0:
+            suggestions.append("Don't forget to record failures too!")
+
+        return suggestions

@@ -688,38 +688,54 @@ level = "INFO"
 ## 8. ディレクトリ構成
 
 ```text
-exocortex/
-├── data/                   # KùzuDB データストア (gitignored)
-├── docs/
-│   └── design_doc.md       # 本設計書
-├── src/
-│   └── exocortex/
-│       ├── __init__.py
-│       ├── main.py         # エントリポイント (MCPサーバー起動)
-│       ├── server.py       # MCPサーバー定義・ツール登録
-│       ├── db.py           # KùzuDB ラッパー
-│       ├── embeddings.py   # Embeddingエンジン
-│       ├── models.py       # データモデル定義
-│       └── config.py       # 設定管理
-├── tests/
+exocortex/                      # プロジェクトルート
+├── exocortex/                  # パッケージ (flat layout)
 │   ├── __init__.py
-│   ├── test_db.py
-│   ├── test_embeddings.py
-│   └── test_tools.py
+│   ├── main.py                 # エントリポイント (MCPサーバー起動)
+│   ├── server.py               # MCPサーバー定義・ツール登録
+│   ├── config.py               # 設定管理
+│   ├── container.py            # 依存性注入コンテナ
+│   ├── domain/                 # ドメイン層
+│   │   ├── __init__.py
+│   │   ├── exceptions.py       # カスタム例外
+│   │   ├── models.py           # ドメインモデル (Pydantic)
+│   │   └── services.py         # ビジネスロジック
+│   └── infra/                  # インフラ層
+│       ├── __init__.py
+│       ├── database.py         # KùzuDB接続管理
+│       ├── embeddings.py       # Embeddingエンジン
+│       └── repositories.py     # データアクセス (Repository)
+├── tests/
+│   ├── conftest.py             # pytest fixtures
+│   ├── unit/                   # ユニットテスト
+│   │   ├── test_exceptions.py
+│   │   ├── test_models.py
+│   │   └── test_services.py
+│   └── integration/            # 統合テスト
+│       ├── test_database.py
+│       └── test_server.py
+├── docs/
+│   ├── design_doc.md           # 本設計書
+│   └── graph_architecture.md   # グラフ構造解説
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions CI
+├── data/                       # KùzuDB データストア (gitignored)
 ├── pyproject.toml
-└── README.md
+├── README.md
+└── README.ja.md
 ```
 
 ---
 
 ## 9. 実装計画
 
-### Phase 1: 基盤構築
+### Phase 1: 基盤構築 ✅
 **目標:** MCPサーバーの骨格を作成し、疎通確認を行う。
 
 1. プロジェクト構造の整備
-   - `src/exocortex/` パッケージ作成
-   - `pyproject.toml` 更新（エントリポイント修正）
+   - `exocortex/` パッケージ作成 (flat layout)
+   - `pyproject.toml` 設定
 2. 設定管理 (`config.py`)
    - 環境変数の読み込み
 3. MCPサーバー起動 (`main.py`, `server.py`)
@@ -729,42 +745,48 @@ exocortex/
    - ターミナルでの起動確認
    - Cursor設定での認識確認
 
-### Phase 2: データ層実装
+### Phase 2: データ層実装 ✅
 **目標:** KùzuDBとEmbeddingエンジンを実装する。
 
-1. Embeddingエンジン (`embeddings.py`)
+1. Embeddingエンジン (`infra/embeddings.py`)
    - fastembed の初期化（遅延ロード）
    - テキスト→ベクトル変換
-2. DBラッパー (`db.py`)
-   - KùzuDB初期化
+2. データベース (`infra/database.py`, `infra/repositories.py`)
+   - KùzuDB初期化・接続管理
    - スキーマ作成（Memory, Context, Tag, リレーション）
    - ベクトルインデックス作成
-3. データモデル (`models.py`)
+   - Repository パターンによるデータアクセス
+3. データモデル (`domain/models.py`)
    - Pydanticモデル定義
 
-### Phase 3: コアツール実装
+### Phase 3: コアツール実装 ✅
 **目標:** `store_memory` と `recall_memories` を実装する。
 
 1. `store_memory` 実装
    - 要約生成、ベクトル化、グラフ保存
+   - 自動リンク提案・重複検出
 2. `recall_memories` 実装
    - ベクトル検索 + フィルタリング
    - コンテキスト・タグ取得
 
-### Phase 4: 管理ツール実装
+### Phase 4: 管理ツール実装 ✅
 **目標:** CRUD操作とユーティリティツールを実装する。
 
 1. `list_memories` 実装
 2. `get_memory` 実装
 3. `delete_memory` 実装
 4. `get_stats` 実装
+5. `update_memory` 実装
+6. `link_memories` / `unlink_memories` 実装
+7. `explore_related` 実装
+8. `analyze_knowledge` 実装
 
-### Phase 5: 統合テスト
+### Phase 5: 統合テスト ✅
 **目標:** AIアシスタントとの連携を確認する。
 
-1. 記憶テスト: 知見の保存と想起
-2. フィルタテスト: コンテキスト・タグ・タイプでの絞り込み
-3. エッジケーステスト: 空の状態、大量データ等
+1. ユニットテスト: models, exceptions, services
+2. 統合テスト: database, server tools
+3. CI: GitHub Actions による自動テスト
 
 ---
 
