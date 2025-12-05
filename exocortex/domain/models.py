@@ -1,4 +1,4 @@
-"""Data models for Exocortex."""
+"""Domain models for Exocortex."""
 
 from __future__ import annotations
 
@@ -27,6 +27,11 @@ class RelationType(str, Enum):
     CONTRADICTS = "contradicts"  # This memory contradicts the target
     EXTENDS = "extends"  # This memory extends/elaborates the target
     DEPENDS_ON = "depends_on"  # This memory depends on the target
+
+
+# =============================================================================
+# Core Domain Models
+# =============================================================================
 
 
 class Memory(BaseModel):
@@ -79,15 +84,9 @@ class Tag(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
 
 
-class StoreMemoryInput(BaseModel):
-    """Input for store_memory tool."""
-
-    content: str = Field(..., description="Content to store")
-    context_name: str = Field(..., description="Project or situation name")
-    tags: list[str] = Field(..., description="Related keywords/tags")
-    memory_type: MemoryType = Field(
-        default=MemoryType.INSIGHT, description="Type of memory"
-    )
+# =============================================================================
+# Knowledge Autonomy Models
+# =============================================================================
 
 
 class SuggestedLink(BaseModel):
@@ -105,77 +104,68 @@ class SuggestedLink(BaseModel):
 class KnowledgeInsight(BaseModel):
     """An insight about knowledge quality improvement."""
 
-    insight_type: str = Field(..., description="Type: duplicate, contradiction, update_suggested, etc.")
+    insight_type: str = Field(
+        ..., description="Type: duplicate, contradiction, update_suggested, etc."
+    )
     message: str = Field(..., description="Human-readable description")
-    related_memory_id: str | None = Field(None, description="Related memory ID if applicable")
-    related_memory_summary: str | None = Field(None, description="Related memory summary")
+    related_memory_id: str | None = Field(
+        None, description="Related memory ID if applicable"
+    )
+    related_memory_summary: str | None = Field(
+        None, description="Related memory summary"
+    )
     confidence: float = Field(..., description="Confidence score (0-1)")
     suggested_action: str | None = Field(None, description="Suggested action to take")
 
 
+class KnowledgeHealthIssue(BaseModel):
+    """An issue found in the knowledge base."""
+
+    issue_type: str = Field(
+        ..., description="Type: orphan, stale, unlinked, duplicate_cluster, etc."
+    )
+    severity: str = Field(..., description="low, medium, high")
+    message: str = Field(..., description="Human-readable description")
+    affected_memory_ids: list[str] = Field(
+        default_factory=list, description="Affected memory IDs"
+    )
+    suggested_action: str = Field(..., description="Suggested action to resolve")
+
+
+# =============================================================================
+# Result Models
+# =============================================================================
+
+
 class StoreMemoryResult(BaseModel):
-    """Result of store_memory tool."""
+    """Result of storing a memory."""
 
     success: bool
     memory_id: str
     summary: str
-    # Knowledge autonomy fields
     suggested_links: list[SuggestedLink] = Field(
         default_factory=list,
-        description="Suggested links to existing memories for knowledge graph enrichment"
+        description="Suggested links to existing memories",
     )
     insights: list[KnowledgeInsight] = Field(
         default_factory=list,
-        description="Insights about potential duplicates, contradictions, or improvements"
+        description="Insights about potential duplicates, contradictions, etc.",
     )
 
 
-class RecallMemoriesInput(BaseModel):
-    """Input for recall_memories tool."""
-
-    query: str = Field(..., description="Search query")
-    limit: int = Field(default=5, ge=1, le=20, description="Number of results")
-    context_filter: str | None = Field(None, description="Filter by context")
-    tag_filter: list[str] | None = Field(None, description="Filter by tags")
-    type_filter: MemoryType | None = Field(None, description="Filter by memory type")
-
-
 class RecallMemoriesResult(BaseModel):
-    """Result of recall_memories tool."""
+    """Result of recalling memories."""
 
     memories: list[MemoryWithContext]
     total_found: int
 
 
-class ListMemoriesInput(BaseModel):
-    """Input for list_memories tool."""
-
-    limit: int = Field(default=20, ge=1, le=100, description="Number of results")
-    offset: int = Field(default=0, ge=0, description="Offset for pagination")
-    context_filter: str | None = Field(None, description="Filter by context")
-    tag_filter: list[str] | None = Field(None, description="Filter by tags")
-    type_filter: MemoryType | None = Field(None, description="Filter by memory type")
-
-
 class ListMemoriesResult(BaseModel):
-    """Result of list_memories tool."""
+    """Result of listing memories."""
 
     memories: list[MemoryWithContext]
     total_count: int
     has_more: bool
-
-
-class GetMemoryResult(BaseModel):
-    """Result of get_memory tool."""
-
-    memory: MemoryWithContext | None
-
-
-class DeleteMemoryResult(BaseModel):
-    """Result of delete_memory tool."""
-
-    success: bool
-    deleted_id: str
 
 
 class MemoryStats(BaseModel):
@@ -188,49 +178,13 @@ class MemoryStats(BaseModel):
     top_tags: list[dict[str, Any]]
 
 
-class LinkMemoriesResult(BaseModel):
-    """Result of link_memories tool."""
-
-    success: bool
-    source_id: str
-    target_id: str
-    relation_type: str
-
-
-class UpdateMemoryResult(BaseModel):
-    """Result of update_memory tool."""
-
-    success: bool
-    memory_id: str
-    summary: str
-    changes: list[str]  # List of what was changed
-
-
-class ExploreResult(BaseModel):
-    """Result of explore_related tool."""
-
-    center_memory: MemoryWithContext
-    related_by_link: list[MemoryWithContext]  # Direct links
-    related_by_tag: list[MemoryWithContext]  # Same tags
-    related_by_context: list[MemoryWithContext]  # Same context
-
-
-class KnowledgeHealthIssue(BaseModel):
-    """An issue found in the knowledge base."""
-
-    issue_type: str = Field(..., description="Type: orphan, stale, unlinked, duplicate_cluster, etc.")
-    severity: str = Field(..., description="low, medium, high")
-    message: str = Field(..., description="Human-readable description")
-    affected_memory_ids: list[str] = Field(default_factory=list, description="Affected memory IDs")
-    suggested_action: str = Field(..., description="Suggested action to resolve")
-
-
 class AnalyzeKnowledgeResult(BaseModel):
-    """Result of analyze_knowledge tool."""
+    """Result of analyzing the knowledge base."""
 
     total_memories: int
     health_score: float = Field(..., description="Overall health score (0-100)")
     issues: list[KnowledgeHealthIssue] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list, description="General improvement suggestions")
+    suggestions: list[str] = Field(
+        default_factory=list, description="General improvement suggestions"
+    )
     stats: dict = Field(default_factory=dict, description="Additional statistics")
-
