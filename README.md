@@ -49,7 +49,7 @@ Exocortex approach (centralized):
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/exocortex.git
+git clone https://github.com/fuwasegu/exocortex.git
 cd exocortex
 
 # Install dependencies with uv
@@ -77,7 +77,7 @@ Auto-updates when uvx cache expires. No manual `git pull` needed.
   "mcpServers": {
     "exocortex": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/yourusername/exocortex", "exocortex"]
+      "args": ["--from", "git+https://github.com/fuwasegu/exocortex", "exocortex"]
     }
   }
 }

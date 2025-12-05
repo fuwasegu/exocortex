@@ -49,7 +49,7 @@ Exocortexのアプローチ（集中型）:
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/yourusername/exocortex.git
+git clone https://github.com/fuwasegu/exocortex.git
 cd exocortex
 
 # uvで依存関係をインストール
@@ -77,7 +77,7 @@ uvx のキャッシュ期限切れ時に自動更新。手動の `git pull` 不�
   "mcpServers": {
     "exocortex": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/yourusername/exocortex", "exocortex"]
+      "args": ["--from", "git+https://github.com/fuwasegu/exocortex", "exocortex"]
     }
   }
 }
