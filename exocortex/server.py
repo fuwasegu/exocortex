@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 SERVER_INSTRUCTIONS = """\
 Exocortex is your external brain - a persistent knowledge store for development insights.
 
+## 🎯 Proactive Knowledge Capture
+
+**IMPORTANT**: Actively propose storing valuable insights during conversations!
+
+### When to Suggest Recording
+- After debugging a tricky issue → "This debugging insight could be valuable. Want me to store it?"
+- When discovering a useful pattern → "This pattern might help in future projects. Should I record it?"
+- After architectural discussions → "This decision has good reasoning. Let me save it for reference."
+- When a solution is found after multiple attempts → "The solution and failed approaches are worth remembering."
+- After explaining something complex → "This explanation could help next time. Want me to store it?"
+
+### How to Propose
+1. Summarize the key insight in 1-2 sentences
+2. Suggest appropriate tags and memory type
+3. Ask if the user wants to store it (or just do it if clearly valuable)
+
+Example:
+> "We just solved a tricky async/await issue with connection pooling.
+> This would make a good `success` memory with tags [async, database, connection-pool].
+> Should I store this for future reference?"
+
 ## Best Practices for Storing Memories
 
 1. **Content Structure**: Write clear, actionable content. Use Markdown.

@@ -47,3 +47,6 @@ uv.lock
 # Logs
 *.log
 
+
+# Old src layout (removed)
+src/
