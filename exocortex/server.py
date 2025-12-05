@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from typing import Any
 
@@ -18,6 +19,41 @@ from .domain.exceptions import (
 from .domain.models import MemoryType, RelationType
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_content(content: str) -> str:
+    """Normalize content that may be wrapped in MCP TextContent format.
+
+    Some MCP clients send content as JSON array: [{"text": "...", "type": "text"}]
+    This function extracts the actual text content.
+
+    Args:
+        content: The content string, possibly JSON-encoded.
+
+    Returns:
+        The normalized plain text content.
+    """
+    if not content:
+        return content
+
+    # Check if it looks like JSON array
+    stripped = content.strip()
+    if not (stripped.startswith("[") and stripped.endswith("]")):
+        return content
+
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, list) and len(data) > 0:
+            # Extract text from first element
+            first = data[0]
+            if isinstance(first, dict) and "text" in first:
+                inner_text = first["text"]
+                # Recursively normalize in case of double-encoding
+                return _normalize_content(inner_text)
+        return content
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return content
+
 
 # =============================================================================
 # Server Instructions
@@ -66,14 +102,37 @@ Example:
 
 4. **Splitting Content**: One memory = one concept. Split multi-topic content.
 
-## Knowledge Autonomy Mode
+## 🧠 MANDATORY: Post-Storage Memory Consolidation
 
-After storing a memory:
-- Check `suggested_links` for related memories to link
-- Review `insights` for potential duplicates or contradictions
-- Act on these suggestions to improve knowledge quality
+**Like human sleep consolidates memories, you MUST organize after storing.**
 
-Use `exo_analyze_knowledge` periodically to maintain knowledge base health.
+When `exo_store_memory` returns successfully, ALWAYS perform these steps:
+
+### Step 1: Link Related Memories
+Check the `suggested_links` in the response. For each suggestion with similarity > 0.7:
+- Call `exo_link_memories` to create the relationship
+- Use the suggested relation type
+
+### Step 2: Handle Insights
+Check the `insights` in the response:
+- **duplicate_candidate**: Consider if the new memory should supersede the old one
+- **potential_contradiction**: Review and resolve with `supersedes` or `contradicts` link
+- **knowledge_gap**: Note for future learning
+
+### Step 3: Periodic Health Check
+If `should_analyze` is true in the response:
+- Call `exo_analyze_knowledge` to check overall health
+- Address any issues found (orphan memories, unlinked memories, etc.)
+
+**This consolidation is NOT optional. Skipping it degrades knowledge quality over time.**
+
+Example flow:
+```
+1. User: "Remember this pattern"
+2. You: Call exo_store_memory → get suggested_links + insights
+3. You: Call exo_link_memories for high-similarity suggestions
+4. You: Report to user: "Stored and linked to 2 related memories"
+```
 """
 
 # =============================================================================
@@ -188,6 +247,10 @@ def store_memory(
     Use this to save development insights, solutions, failures,
     technical decisions, or notes.
 
+    **IMPORTANT**: After storing, you MUST process the returned `next_actions`
+    to consolidate the knowledge base. This is like how sleep consolidates
+    human memory - it's essential for knowledge quality.
+
     Args:
         content: The content to store (supports Markdown).
         context_name: The project or situation name.
@@ -195,8 +258,12 @@ def store_memory(
         memory_type: Type of memory (insight, success, failure, decision, note).
 
     Returns:
-        Success status, memory_id, summary, suggested_links, and insights.
+        Success status, memory_id, summary, suggested_links, insights,
+        and next_actions that MUST be executed for memory consolidation.
     """
+    # Normalize content in case it's wrapped in MCP TextContent format
+    normalized_content = _normalize_content(content)
+
     try:
         mem_type = MemoryType(memory_type)
     except ValueError:
@@ -206,12 +273,82 @@ def store_memory(
 
     try:
         result = container.memory_service.store_memory(
-            content=content,
+            content=normalized_content,
             context_name=context_name,
             tags=tags,
             memory_type=mem_type,
             auto_analyze=True,
         )
+
+        # Build next_actions for memory consolidation
+        next_actions = []
+
+        # Action 1: Link high-similarity memories
+        high_similarity_links = [
+            link for link in result.suggested_links if link.similarity >= 0.7
+        ]
+        if high_similarity_links:
+            next_actions.append(
+                {
+                    "action": "link_memories",
+                    "priority": "high",
+                    "description": f"Link to {len(high_similarity_links)} related memories",
+                    "details": [
+                        {
+                            "call": "exo_link_memories",
+                            "args": {
+                                "source_id": result.memory_id,
+                                "target_id": link.target_id,
+                                "relation_type": link.suggested_relation.value,
+                                "reason": link.reason,
+                            },
+                        }
+                        for link in high_similarity_links
+                    ],
+                }
+            )
+
+        # Action 2: Handle insights (duplicates, contradictions)
+        critical_insights = [
+            i
+            for i in result.insights
+            if i.insight_type in ("duplicate_candidate", "potential_contradiction")
+        ]
+        if critical_insights:
+            next_actions.append(
+                {
+                    "action": "review_insights",
+                    "priority": "medium",
+                    "description": "Review potential duplicates or contradictions",
+                    "details": [
+                        {
+                            "type": insight.insight_type,
+                            "message": insight.message,
+                            "related_id": insight.related_memory_id,
+                            "suggested_action": insight.suggested_action,
+                        }
+                        for insight in critical_insights
+                    ],
+                }
+            )
+
+        # Action 3: Periodic health check (every 10 memories or on issues)
+        stats = container.memory_service.get_stats()
+        total_memories = stats.total_memories
+        should_analyze = (
+            total_memories % 10 == 0  # Every 10 memories
+            or len(critical_insights) > 0  # On critical insights
+        )
+
+        if should_analyze:
+            next_actions.append(
+                {
+                    "action": "analyze_health",
+                    "priority": "low",
+                    "description": "Run knowledge base health check",
+                    "details": {"call": "exo_analyze_knowledge"},
+                }
+            )
 
         return {
             "success": result.success,
@@ -237,6 +374,14 @@ def store_memory(
                 }
                 for insight in result.insights
             ],
+            # New fields for memory consolidation
+            "next_actions": next_actions,
+            "consolidation_required": len(next_actions) > 0,
+            "consolidation_message": (
+                f"🧠 Memory stored. {len(next_actions)} consolidation action(s) required."
+                if next_actions
+                else "✅ Memory stored. No consolidation needed."
+            ),
         }
     except ValidationError as e:
         return {"success": False, "error": str(e)}
@@ -560,6 +705,9 @@ def update_memory(
     Returns:
         Success status, updated summary, and list of changes.
     """
+    # Normalize content in case it's wrapped in MCP TextContent format
+    normalized_content = _normalize_content(content) if content else None
+
     mem_type = None
     if memory_type:
         try:
@@ -570,7 +718,7 @@ def update_memory(
     container = get_container()
     success, changes, summary = container.memory_service.update_memory(
         memory_id=memory_id,
-        content=content,
+        content=normalized_content,
         tags=tags,
         memory_type=mem_type,
     )
