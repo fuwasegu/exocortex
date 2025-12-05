@@ -14,10 +14,10 @@ class TestDatabaseIntegration:
 
     def test_database_initialization(self, container: Container):
         """Test that database initializes correctly."""
-        db = container.database
+        db_manager = container.database_manager
 
-        # Execute a simple query to verify connection
-        result = db.execute("MATCH (n) RETURN count(n)")
+        # Execute a simple query to verify connection (use read connection)
+        result = db_manager.read_connection.execute("MATCH (n) RETURN count(n)")
         assert result.has_next()
 
     def test_full_memory_lifecycle(self, container: Container):

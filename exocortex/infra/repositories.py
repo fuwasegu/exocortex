@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.exceptions import (
     DuplicateLinkError,
@@ -19,31 +19,75 @@ from ..domain.models import (
     MemoryWithContext,
     RelationType,
 )
-from .database import DatabaseConnection
+from .database import DatabaseConnection, SmartDatabaseManager
 from .embeddings import EmbeddingEngine
+
+if TYPE_CHECKING:
+    import kuzu
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryRepository:
-    """Repository for memory data access operations."""
+    """Repository for memory data access operations.
+
+    Supports smart connection management:
+    - Read operations use read-only connections (allows concurrent access)
+    - Write operations use read-write connections (exclusive lock with retry)
+    """
 
     def __init__(
         self,
-        db: DatabaseConnection,
+        db_manager: SmartDatabaseManager | DatabaseConnection,
         embedding_engine: EmbeddingEngine,
         max_summary_length: int = 200,
     ) -> None:
         """Initialize the repository.
 
         Args:
-            db: Database connection.
+            db_manager: Smart database manager or legacy database connection.
             embedding_engine: Embedding engine for vector operations.
             max_summary_length: Maximum length for summaries.
         """
-        self._db = db
+        self._db_manager = db_manager
         self._embedding_engine = embedding_engine
         self._max_summary_length = max_summary_length
+
+        # Check if using smart manager or legacy connection
+        self._use_smart_manager = isinstance(db_manager, SmartDatabaseManager)
+
+    def _get_read_connection(self) -> DatabaseConnection:
+        """Get a read-only database connection."""
+        if self._use_smart_manager:
+            return self._db_manager.read_connection  # type: ignore
+        return self._db_manager  # type: ignore
+
+    def _execute_read(
+        self, query: str, parameters: dict | None = None
+    ) -> kuzu.QueryResult:
+        """Execute a read query using read-only connection."""
+        conn = self._get_read_connection()
+        if parameters:
+            return conn.execute(query, parameters=parameters)
+        return conn.execute(query)
+
+    def _execute_write(
+        self, query: str, parameters: dict | None = None
+    ) -> kuzu.QueryResult:
+        """Execute a write query using read-write connection.
+
+        For smart manager, this uses the write context with retry logic.
+        """
+        if self._use_smart_manager:
+            write_conn = self._db_manager.get_write_connection()  # type: ignore
+            if parameters:
+                return write_conn.execute(query, parameters=parameters)
+            return write_conn.execute(query)
+        else:
+            # Legacy mode - use same connection
+            if parameters:
+                return self._db_manager.execute(query, parameters=parameters)  # type: ignore
+            return self._db_manager.execute(query)  # type: ignore
 
     def compute_similarity(
         self, embedding1: list[float], embedding2: list[float]
@@ -87,7 +131,7 @@ class MemoryRepository:
             if not tag_normalized:
                 continue
 
-            self._db.execute(
+            self._execute_write(
                 """
                 MERGE (t:Tag {name: $name})
                 ON CREATE SET t.created_at = $created_at
@@ -95,7 +139,7 @@ class MemoryRepository:
                 parameters={"name": tag_normalized, "created_at": timestamp},
             )
 
-            self._db.execute(
+            self._execute_write(
                 """
                 MATCH (m:Memory {id: $memory_id}), (t:Tag {name: $tag_name})
                 CREATE (m)-[:TAGGED_WITH]->(t)
@@ -170,7 +214,7 @@ class MemoryRepository:
         embedding = self._embedding_engine.embed(content)
 
         # Create memory node
-        self._db.execute(
+        self._execute_write(
             """
             CREATE (m:Memory {
                 id: $id,
@@ -194,7 +238,7 @@ class MemoryRepository:
         )
 
         # Create or get context
-        self._db.execute(
+        self._execute_write(
             """
             MERGE (c:Context {name: $name})
             ON CREATE SET c.created_at = $created_at
@@ -203,7 +247,7 @@ class MemoryRepository:
         )
 
         # Create relationship to context
-        self._db.execute(
+        self._execute_write(
             """
             MATCH (m:Memory {id: $memory_id}), (c:Context {name: $context_name})
             CREATE (m)-[:ORIGINATED_IN]->(c)
@@ -217,7 +261,7 @@ class MemoryRepository:
             if not tag_normalized:
                 continue
 
-            self._db.execute(
+            self._execute_write(
                 """
                 MERGE (t:Tag {name: $name})
                 ON CREATE SET t.created_at = $created_at
@@ -225,7 +269,7 @@ class MemoryRepository:
                 parameters={"name": tag_normalized, "created_at": now},
             )
 
-            self._db.execute(
+            self._execute_write(
                 """
                 MATCH (m:Memory {id: $memory_id}), (t:Tag {name: $tag_name})
                 CREATE (m)-[:TAGGED_WITH]->(t)
@@ -260,7 +304,7 @@ class MemoryRepository:
             raise SelfLinkError(source_id)
 
         # Check both memories exist
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
             RETURN s.id, t.id
@@ -272,7 +316,7 @@ class MemoryRepository:
             raise MemoryNotFoundError(f"{source_id} or {target_id}")
 
         # Check if link already exists
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
             RETURN r.relation_type
@@ -287,7 +331,7 @@ class MemoryRepository:
         now = datetime.now(timezone.utc)
 
         # Create the relationship
-        self._db.execute(
+        self._execute_write(
             """
             MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
             CREATE (s)-[:RELATED_TO {
@@ -313,7 +357,7 @@ class MemoryRepository:
 
     def get_by_id(self, memory_id: str) -> MemoryWithContext | None:
         """Get a memory by ID."""
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory {id: $id})
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
@@ -354,7 +398,7 @@ class MemoryRepository:
         fetch_limit = limit + 5 if exclude_id else limit
 
         try:
-            result = self._db.execute(
+            result = self._execute_read(
                 """
                 CALL QUERY_VECTOR_INDEX('Memory', 'memory_embedding_idx', $embedding, $k)
                 YIELD node, distance
@@ -392,7 +436,7 @@ class MemoryRepository:
 
         Used when vector index is not available.
         """
-        result = self._db.execute("""
+        result = self._execute_read("""
             MATCH (m:Memory)
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
             RETURN m.id, m.summary, m.embedding, m.memory_type, c.name as context
@@ -499,7 +543,7 @@ class MemoryRepository:
             WHERE {where_clause}
             RETURN count(DISTINCT m.id) as total
         """
-        count_result = self._db.execute(count_query, parameters=params)
+        count_result = self._execute_read(count_query, parameters=params)
         total_count = count_result.get_next()[0] if count_result.has_next() else 0
 
         # Get memories
@@ -517,7 +561,7 @@ class MemoryRepository:
         params["offset"] = offset
         params["limit"] = limit
 
-        result = self._db.execute(query, parameters=params)
+        result = self._execute_read(query, parameters=params)
         memories: list[MemoryWithContext] = []
 
         while result.has_next():
@@ -536,7 +580,7 @@ class MemoryRepository:
 
     def get_links(self, memory_id: str) -> list[MemoryLink]:
         """Get all outgoing links from a memory."""
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(t:Memory)
             RETURN t.id, t.summary, r.relation_type, r.reason, r.created_at
@@ -574,7 +618,7 @@ class MemoryRepository:
         }
 
         # Get directly linked memories
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(linked:Memory)
             OPTIONAL MATCH (linked)-[:ORIGINATED_IN]->(c:Context)
@@ -611,7 +655,7 @@ class MemoryRepository:
 
         # Get tag siblings
         if include_tag_siblings:
-            result = self._db.execute(
+            result = self._execute_read(
                 """
                 MATCH (m:Memory {id: $id})-[:TAGGED_WITH]->(t:Tag)<-[:TAGGED_WITH]-(sibling:Memory)
                 WHERE m <> sibling
@@ -637,7 +681,7 @@ class MemoryRepository:
 
         # Get context siblings
         if include_context_siblings:
-            result = self._db.execute(
+            result = self._execute_read(
                 """
                 MATCH (m:Memory {id: $id})-[:ORIGINATED_IN]->(c:Context)<-[:ORIGINATED_IN]-(sibling:Memory)
                 WHERE m <> sibling
@@ -681,7 +725,7 @@ class MemoryRepository:
             Tuple of (success, changes, summary).
         """
         # Get existing memory info including tags
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory {id: $id})
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
@@ -719,7 +763,7 @@ class MemoryRepository:
 
             # Get existing RELATED_TO links (both directions)
             outgoing_links = []
-            result = self._db.execute(
+            result = self._execute_read(
                 """
                 MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(t:Memory)
                 RETURN t.id, r.relation_type, r.reason, r.created_at
@@ -730,7 +774,7 @@ class MemoryRepository:
                 outgoing_links.append(result.get_next())
 
             incoming_links = []
-            result = self._db.execute(
+            result = self._execute_read(
                 """
                 MATCH (s:Memory)-[r:RELATED_TO]->(m:Memory {id: $id})
                 RETURN s.id, r.relation_type, r.reason, r.created_at
@@ -748,10 +792,10 @@ class MemoryRepository:
                 "MATCH (:Memory)-[r:RELATED_TO]->(m:Memory {id: $id}) DELETE r",
                 "MATCH (m:Memory {id: $id}) DELETE m",
             ]:
-                self._db.execute(rel_query, parameters={"id": memory_id})
+                self._execute_write(rel_query, parameters={"id": memory_id})
 
             # Recreate memory with new content
-            self._db.execute(
+            self._execute_write(
                 """
                 CREATE (m:Memory {
                     id: $id,
@@ -776,7 +820,7 @@ class MemoryRepository:
 
             # Re-create context relationship
             if context_name:
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (m:Memory {id: $memory_id}), (c:Context {name: $context_name})
                     CREATE (m)-[:ORIGINATED_IN]->(c)
@@ -789,7 +833,7 @@ class MemoryRepository:
 
             # Re-create RELATED_TO links
             for link in outgoing_links:
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
                     CREATE (s)-[:RELATED_TO {
@@ -808,7 +852,7 @@ class MemoryRepository:
                 )
 
             for link in incoming_links:
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (s:Memory {id: $source_id}), (t:Memory {id: $target_id})
                     CREATE (s)-[:RELATED_TO {
@@ -835,7 +879,7 @@ class MemoryRepository:
         else:
             # No content change - can update in place
             if memory_type is not None:
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (m:Memory {id: $id})
                     SET m.memory_type = $memory_type,
@@ -851,7 +895,7 @@ class MemoryRepository:
 
             if tags_changed:
                 # Delete existing tag relationships
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag)
                     DELETE r
@@ -865,7 +909,7 @@ class MemoryRepository:
 
             # Update timestamp if only tags changed
             if changes and memory_type is None:
-                self._db.execute(
+                self._execute_write(
                     """
                     MATCH (m:Memory {id: $id})
                     SET m.updated_at = $updated_at
@@ -887,7 +931,7 @@ class MemoryRepository:
 
     def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory and its relationships."""
-        result = self._db.execute(
+        result = self._execute_read(
             "MATCH (m:Memory {id: $id}) RETURN m.id",
             parameters={"id": memory_id},
         )
@@ -896,25 +940,25 @@ class MemoryRepository:
             return False
 
         # Delete relationships
-        self._db.execute(
+        self._execute_write(
             "MATCH (m:Memory {id: $id})-[r:ORIGINATED_IN]->(:Context) DELETE r",
             parameters={"id": memory_id},
         )
-        self._db.execute(
+        self._execute_write(
             "MATCH (m:Memory {id: $id})-[r:TAGGED_WITH]->(:Tag) DELETE r",
             parameters={"id": memory_id},
         )
-        self._db.execute(
+        self._execute_write(
             "MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(:Memory) DELETE r",
             parameters={"id": memory_id},
         )
-        self._db.execute(
+        self._execute_write(
             "MATCH (:Memory)-[r:RELATED_TO]->(m:Memory {id: $id}) DELETE r",
             parameters={"id": memory_id},
         )
 
         # Delete node
-        self._db.execute(
+        self._execute_write(
             "MATCH (m:Memory {id: $id}) DELETE m",
             parameters={"id": memory_id},
         )
@@ -924,7 +968,7 @@ class MemoryRepository:
 
     def delete_link(self, source_id: str, target_id: str) -> bool:
         """Delete a link between two memories."""
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
             RETURN r
@@ -935,7 +979,7 @@ class MemoryRepository:
         if not result.has_next():
             return False
 
-        self._db.execute(
+        self._execute_write(
             """
             MATCH (s:Memory {id: $source_id})-[r:RELATED_TO]->(t:Memory {id: $target_id})
             DELETE r
@@ -952,10 +996,10 @@ class MemoryRepository:
 
     def get_stats(self) -> MemoryStats:
         """Get statistics about stored memories."""
-        result = self._db.execute("MATCH (m:Memory) RETURN count(m)")
+        result = self._execute_read("MATCH (m:Memory) RETURN count(m)")
         total_memories = result.get_next()[0] if result.has_next() else 0
 
-        result = self._db.execute("""
+        result = self._execute_read("""
             MATCH (m:Memory)
             RETURN m.memory_type, count(m) as count
         """)
@@ -964,13 +1008,13 @@ class MemoryRepository:
             row = result.get_next()
             memories_by_type[row[0]] = row[1]
 
-        result = self._db.execute("MATCH (c:Context) RETURN count(c)")
+        result = self._execute_read("MATCH (c:Context) RETURN count(c)")
         total_contexts = result.get_next()[0] if result.has_next() else 0
 
-        result = self._db.execute("MATCH (t:Tag) RETURN count(t)")
+        result = self._execute_read("MATCH (t:Tag) RETURN count(t)")
         total_tags = result.get_next()[0] if result.has_next() else 0
 
-        result = self._db.execute("""
+        result = self._execute_read("""
             MATCH (m:Memory)-[:TAGGED_WITH]->(t:Tag)
             RETURN t.name, count(m) as count
             ORDER BY count DESC
@@ -998,7 +1042,7 @@ class MemoryRepository:
         Returns:
             List of (id, summary) tuples for memories without tags.
         """
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory)
             WHERE NOT EXISTS { MATCH (m)-[:TAGGED_WITH]->(:Tag) }
@@ -1015,7 +1059,7 @@ class MemoryRepository:
 
     def get_unlinked_count(self) -> int:
         """Get count of memories without any RELATED_TO links."""
-        result = self._db.execute("""
+        result = self._execute_read("""
             MATCH (m:Memory)
             WHERE NOT EXISTS { MATCH (m)-[:RELATED_TO]->(:Memory) }
               AND NOT EXISTS { MATCH (:Memory)-[:RELATED_TO]->(m) }
@@ -1035,7 +1079,7 @@ class MemoryRepository:
         Returns:
             List of (id, summary) tuples for stale memories.
         """
-        result = self._db.execute(
+        result = self._execute_read(
             """
             MATCH (m:Memory)
             WHERE m.updated_at < $threshold
