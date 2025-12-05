@@ -100,6 +100,60 @@ uvx のキャッシュ期限切れ時に自動更新。手動の `git pull` 不�
 
 > **Note:** データは `~/.exocortex/` に保存され、どちらの方法でも保持されます。
 
+#### 方法3: プロキシモード（複数のCursorインスタンス対応・推奨）
+
+**複数のCursorウィンドウから同時にExocortexを使用したい場合は、この方法を使用してください。**
+
+KùzuDBは複数プロセスからの同時書き込みをサポートしていないため、各Cursorインスタンスが独自のサーバープロセスを起動するstdio方式では、ロック競合が発生します。プロキシモードでは、バックグラウンドで単一のSSEサーバーを自動起動し、各Cursorインスタンスはそのサーバーにプロキシ接続します。
+
+```json
+{
+  "mcpServers": {
+    "exocortex": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/fuwasegu/exocortex",
+        "exocortex",
+        "--mode", "proxy",
+        "--ensure-server"
+      ]
+    }
+  }
+}
+```
+
+**動作の流れ:**
+1. 最初のCursorがExocortexを起動 → SSEサーバーが自動的にバックグラウンドで起動
+2. 以降のCursorは既存のSSEサーバーに接続
+3. 全てのCursorが同じサーバーを共有 → ロック競合なし！
+
+> **Note:** 手動でのサーバー起動は不要です。`--ensure-server` オプションにより、サーバーが起動していなければ自動的に起動します。
+
+#### 方法4: 手動サーバー管理（上級者向け）
+
+サーバーを手動で管理したい場合：
+
+**Step 1: サーバーを起動**
+
+```bash
+# ターミナルでサーバーを起動（バックグラウンドで実行することも可能）
+uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
+```
+
+**Step 2: Cursorの設定**
+
+```json
+{
+  "mcpServers": {
+    "exocortex": {
+      "url": "http://127.0.0.1:8765/sse"
+    }
+  }
+}
+```
+
+> **Tip:** サーバーをシステム起動時に自動で開始するには、macOSの場合は `launchd`、Linuxの場合は `systemd` を使用してください。
+
 ## MCPツール
 
 ### 基本ツール
@@ -170,11 +224,16 @@ Exocortexは知識グラフを自動的に改善します！記憶を保存す�
 
 | 変数名 | デフォルト値 | 説明 |
 |--------|-------------|------|
-| `EXOCORTEX_DATA_DIR` | `./data` | データベース保存先 |
+| `EXOCORTEX_DATA_DIR` | `~/.exocortex` | データベース保存先 |
 | `EXOCORTEX_LOG_LEVEL` | `INFO` | ログレベル（DEBUG/INFO/WARNING/ERROR） |
-| `EXOCORTEX_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | 使用するEmbeddingモデル |
+| `EXOCORTEX_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | 使用するEmbeddingモデル |
+| `EXOCORTEX_TRANSPORT` | `stdio` | トランスポートモード（stdio/sse/streamable-http） |
+| `EXOCORTEX_HOST` | `127.0.0.1` | サーバーのバインドアドレス（HTTP時） |
+| `EXOCORTEX_PORT` | `8765` | サーバーのポート番号（HTTP時） |
 
 ## アーキテクチャ
+
+### Stdioモード（デフォルト）
 
 ```
 ┌─────────────────┐     stdio      ┌─────────────────────────────┐
@@ -190,6 +249,28 @@ Exocortexは知識グラフを自動的に改善します！記憶を保存す�
                                   │  │  (Graph + Vector)     │  │
                                   │  └────────────────────────┘  │
                                   └─────────────────────────────┘
+```
+
+### HTTP/SSEモード（複数インスタンス対応）
+
+```
+┌─────────────────┐                
+│  Cursor #1      │──────┐         
+└─────────────────┘      │         
+                         │  HTTP   ┌─────────────────────────────┐
+┌─────────────────┐      ├────────►│       Exocortex MCP         │
+│  Cursor #2      │──────┤   SSE   │     (スタンドアロン)         │
+└─────────────────┘      │         │                             │
+                         │         │  ┌─────────┐  ┌──────────┐  │
+┌─────────────────┐      │         │  │ Tools   │  │ Embedding│  │
+│  Cursor #3      │──────┘         │  │ Handler │  │  Engine  │  │
+└─────────────────┘                │  └────┬────┘  └────┬─────┘  │
+                                   │       │            │        │
+                                   │  ┌────▼────────────▼─────┐  │
+                                   │  │       KùzuDB          │  │
+                                   │  │  (Graph + Vector)     │  │
+                                   │  └────────────────────────┘  │
+                                   └─────────────────────────────┘
 ```
 
 ### 知識グラフの構造

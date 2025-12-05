@@ -28,6 +28,11 @@ class Config:
     max_tags_per_memory: int = 20
     stale_memory_days: int = 90
 
+    # Server settings
+    server_host: str = "127.0.0.1"
+    server_port: int = 8765
+    server_transport: str = "stdio"  # "stdio", "sse", or "streamable-http"
+
     @property
     def db_path(self) -> Path:
         """Get the full database path."""
@@ -60,6 +65,9 @@ class Config:
             ),
             max_tags_per_memory=int(os.environ.get("EXOCORTEX_MAX_TAGS", "20")),
             stale_memory_days=int(os.environ.get("EXOCORTEX_STALE_DAYS", "90")),
+            server_host=os.environ.get("EXOCORTEX_HOST", "127.0.0.1"),
+            server_port=int(os.environ.get("EXOCORTEX_PORT", "8765")),
+            server_transport=os.environ.get("EXOCORTEX_TRANSPORT", "stdio"),
         )
 
 
