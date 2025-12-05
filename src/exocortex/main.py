@@ -1,5 +1,7 @@
 """Entry point for Exocortex MCP server."""
 
+from __future__ import annotations
+
 import logging
 import sys
 
