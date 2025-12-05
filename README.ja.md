@@ -68,6 +68,25 @@ uv run exocortex
 
 `~/.cursor/mcp.json` に以下を追加:
 
+#### 方法1: GitHubから直接実行（推奨）
+
+uvx のキャッシュ期限切れ時に自動更新。手動の `git pull` 不要。
+
+```json
+{
+  "mcpServers": {
+    "exocortex": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/yourusername/exocortex", "exocortex"]
+    }
+  }
+}
+```
+
+#### 方法2: ローカルインストール
+
+開発やカスタマイズ用。
+
 ```json
 {
   "mcpServers": {
@@ -78,6 +97,8 @@ uv run exocortex
   }
 }
 ```
+
+> **Note:** データは `~/.exocortex/` に保存され、どちらの方法でも保持されます。
 
 ## MCPツール
 
