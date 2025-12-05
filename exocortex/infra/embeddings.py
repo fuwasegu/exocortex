@@ -3,16 +3,37 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
-
-from .config import get_config
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
+
+
+class EmbeddingEngineProtocol(Protocol):
+    """Protocol for embedding engines."""
+
+    @property
+    def dimension(self) -> int:
+        """Get the embedding dimension."""
+        ...
+
+    def embed(self, text: str) -> list[float]:
+        """Embed a single text string."""
+        ...
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts."""
+        ...
+
+    def compute_similarity(
+        self, embedding1: list[float], embedding2: list[float]
+    ) -> float:
+        """Compute cosine similarity between two embeddings."""
+        ...
 
 
 class EmbeddingEngine:
@@ -21,18 +42,18 @@ class EmbeddingEngine:
     Uses lazy loading to avoid slow startup times.
     """
 
-    def __init__(self, model_name: str | None = None) -> None:
+    def __init__(self, model_name: str) -> None:
         """Initialize the embedding engine.
 
         Args:
-            model_name: Name of the embedding model. If None, uses config default.
+            model_name: Name of the embedding model.
         """
-        self._model: "TextEmbedding | None" = None
-        self._model_name = model_name or get_config().embedding_model
+        self._model: TextEmbedding | None = None
+        self._model_name = model_name
         self._dimension: int | None = None
 
     @property
-    def model(self) -> "TextEmbedding":
+    def model(self) -> TextEmbedding:
         """Get the embedding model, loading it lazily if needed."""
         if self._model is None:
             logger.info(f"Loading embedding model: {self._model_name}")
@@ -100,22 +121,3 @@ class EmbeddingEngine:
             return 0.0
 
         return float(dot_product / (norm1 * norm2))
-
-
-# Global embedding engine instance (lazy loaded)
-_embedding_engine: EmbeddingEngine | None = None
-
-
-def get_embedding_engine() -> EmbeddingEngine:
-    """Get the global embedding engine instance."""
-    global _embedding_engine
-    if _embedding_engine is None:
-        _embedding_engine = EmbeddingEngine()
-    return _embedding_engine
-
-
-def reset_embedding_engine() -> None:
-    """Reset the global embedding engine (useful for testing)."""
-    global _embedding_engine
-    _embedding_engine = None
-
