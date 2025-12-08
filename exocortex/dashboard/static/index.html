@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧠 Exocortex Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">🧠</span>
+                    <span class="logo-text">Exocortex</span>
+                </div>
+                <div class="health-badge" id="health-badge">
+                    <span class="health-score">--</span>
+                    <span class="health-label">Health</span>
+                </div>
+            </div>
+            <nav class="nav">
+                <button class="nav-btn active" data-tab="overview">Overview</button>
+                <button class="nav-btn" data-tab="memories">Memories</button>
+                <button class="nav-btn" data-tab="dream">Dream Log</button>
+                <button class="nav-btn" data-tab="graph">Graph</button>
+            </nav>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Overview Tab -->
+            <section class="tab-content active" id="tab-overview">
+                <div class="stats-grid">
+                    <div class="stat-card primary">
+                        <div class="stat-icon">💭</div>
+                        <div class="stat-value" id="stat-total">--</div>
+                        <div class="stat-label">Total Memories</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💡</div>
+                        <div class="stat-value" id="stat-insights">--</div>
+                        <div class="stat-label">Insights</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-value" id="stat-successes">--</div>
+                        <div class="stat-label">Successes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">❌</div>
+                        <div class="stat-value" id="stat-failures">--</div>
+                        <div class="stat-label">Failures</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🎯</div>
+                        <div class="stat-value" id="stat-decisions">--</div>
+                        <div class="stat-label">Decisions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📝</div>
+                        <div class="stat-value" id="stat-notes">--</div>
+                        <div class="stat-label">Notes</div>
+                    </div>
+                </div>
+
+                <div class="overview-grid">
+                    <div class="card contexts-card">
+                        <h3 class="card-title">🌐 Contexts</h3>
+                        <div class="tag-cloud" id="contexts-cloud"></div>
+                    </div>
+                    <div class="card tags-card">
+                        <h3 class="card-title">🏷️ Tags</h3>
+                        <div class="tag-cloud" id="tags-cloud"></div>
+                    </div>
+                </div>
+
+                <div class="card health-card">
+                    <h3 class="card-title">🩺 Knowledge Base Health</h3>
+                    <div class="health-details" id="health-details">
+                        <p>Loading health analysis...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Memories Tab -->
+            <section class="tab-content" id="tab-memories">
+                <div class="memories-header">
+                    <div class="search-box">
+                        <input type="text" id="memory-search" placeholder="Search memories...">
+                    </div>
+                    <div class="filters">
+                        <select id="filter-type">
+                            <option value="">All Types</option>
+                            <option value="insight">💡 Insight</option>
+                            <option value="success">✅ Success</option>
+                            <option value="failure">❌ Failure</option>
+                            <option value="decision">🎯 Decision</option>
+                            <option value="note">📝 Note</option>
+                        </select>
+                        <select id="filter-context">
+                            <option value="">All Contexts</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="memories-list" id="memories-list">
+                    <p class="loading">Loading memories...</p>
+                </div>
+                <div class="pagination" id="pagination"></div>
+
+                <!-- Memory Detail Modal -->
+                <div class="modal" id="memory-modal">
+                    <div class="modal-content">
+                        <button class="modal-close" id="modal-close">&times;</button>
+                        <div id="memory-detail"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dream Log Tab -->
+            <section class="tab-content" id="tab-dream">
+                <div class="dream-header">
+                    <h2>💤 Dream Log</h2>
+                    <div class="dream-status">
+                        <span class="status-indicator" id="stream-status"></span>
+                        <span id="stream-status-text">Connecting...</span>
+                    </div>
+                </div>
+                <div class="dream-log" id="dream-log">
+                    <div class="log-entry log-info">Waiting for dream log...</div>
+                </div>
+            </section>
+
+            <!-- Graph Tab -->
+            <section class="tab-content" id="tab-graph">
+                <div class="graph-header">
+                    <h2>🕸️ Knowledge Graph</h2>
+                    <p class="graph-hint">Connections between your memories</p>
+                </div>
+                <div class="graph-container" id="graph-container">
+                    <canvas id="graph-canvas"></canvas>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span>Exocortex — Your Second Brain</span>
+            <span class="footer-stats" id="footer-stats"></span>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
