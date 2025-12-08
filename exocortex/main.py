@@ -107,18 +107,74 @@ def run_server_mode(
     if transport == "stdio":
         mcp.run()
     elif transport in ("sse", "streamable-http"):
-        logger.info(f"Server URL: http://{host}:{port}/sse")
+        logger.info(f"MCP URL: http://{host}:{port}/mcp/sse")
+        logger.info(f"Dashboard URL: http://{host}:{port}/")
 
         # Register cleanup for PID/version files (for proxy mode auto-update)
         register_server_cleanup(config)
 
-        # Configure host and port via settings
-        mcp.settings.host = host
-        mcp.settings.port = port
-        mcp.run(transport=transport)
+        # Run integrated server with dashboard
+        _run_integrated_server(host, port, transport, logger)
     else:
         logger.error(f"Unknown transport: {transport}")
         sys.exit(1)
+
+
+def _run_integrated_server(
+    host: str, port: int, transport: str, logger: logging.Logger
+) -> None:
+    """Run MCP server with integrated dashboard."""
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+    from starlette.staticfiles import StaticFiles
+
+    from .dashboard.app import (
+        STATIC_DIR,
+        api_graph,
+        api_health,
+        api_memories,
+        api_memory_detail,
+        api_stats,
+        index,
+        stream_dream_log,
+    )
+
+    # Get MCP ASGI app based on transport type
+    if transport == "sse":
+        mcp_app = mcp.sse_app()
+    else:
+        mcp_app = mcp.streamable_http_app()
+
+    # Dashboard routes
+    dashboard_routes = [
+        Route("/", index),
+        Route("/api/stats", api_stats),
+        Route("/api/memories", api_memories),
+        Route("/api/memories/{memory_id}", api_memory_detail),
+        Route("/api/health", api_health),
+        Route("/api/graph", api_graph),
+        Route("/api/logs/stream", stream_dream_log),
+    ]
+
+    # Build integrated app routes
+    routes = [
+        *dashboard_routes,
+        Mount("/mcp", app=mcp_app),  # MCP at /mcp (SSE at /mcp/sse)
+    ]
+
+    # Add static files if directory exists
+    if STATIC_DIR.exists():
+        routes.append(
+            Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        )
+
+    # Create integrated Starlette app
+    # Note: mcp_app is already a Starlette app, it handles its own lifespan
+    app = Starlette(routes=routes)
+
+    logger.info("Starting integrated MCP + Dashboard server...")
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def run_proxy_mode(
