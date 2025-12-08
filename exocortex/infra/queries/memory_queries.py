@@ -255,4 +255,3 @@ class TagSiblingColumns:
     CONTEXT = 11
     ALL_TAGS = 12
     SHARED_TAGS = 13
-

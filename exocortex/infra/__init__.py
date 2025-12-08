@@ -9,5 +9,3 @@ __all__ = [
     "EmbeddingEngine",
     "MemoryRepository",
 ]
-
-# Note: repositories.py is deprecated in favor of repositories/ package

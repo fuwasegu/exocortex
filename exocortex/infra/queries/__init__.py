@@ -9,4 +9,3 @@ This module centralizes all Cypher query definitions to:
 from exocortex.infra.queries.memory_queries import MemoryQueryBuilder
 
 __all__ = ["MemoryQueryBuilder"]
-
