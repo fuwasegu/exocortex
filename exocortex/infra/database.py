@@ -106,6 +106,8 @@ class DatabaseConnection:
                 last_accessed_at TIMESTAMP,
                 access_count INT64,
                 decay_rate DOUBLE,
+                frustration_score DOUBLE,
+                time_cost_hours DOUBLE,
                 PRIMARY KEY (id)
             )
         """)
@@ -238,6 +240,34 @@ class DatabaseConnection:
         except Exception:
             logger.info("Pattern table not found - will be created by _init_schema")
             # Pattern table will be created by CREATE NODE TABLE IF NOT EXISTS
+
+        # Migration 3: Frustration Indexing columns (Phase 2.0 - Somatic Marker)
+        try:
+            result = self.conn.execute("""
+                MATCH (m:Memory) RETURN m.frustration_score LIMIT 1
+            """)
+            _ = result.get_next() if result.has_next() else None
+            logger.debug("Frustration indexing columns already exist")
+        except Exception:
+            logger.info("Migrating Memory table: adding frustration columns...")
+
+            try:
+                self.conn.execute("""
+                    ALTER TABLE Memory ADD frustration_score DOUBLE DEFAULT 0.0
+                """)
+                logger.debug("Added frustration_score column")
+            except Exception as e:
+                logger.debug(f"frustration_score column might already exist: {e}")
+
+            try:
+                self.conn.execute("""
+                    ALTER TABLE Memory ADD time_cost_hours DOUBLE DEFAULT NULL
+                """)
+                logger.debug("Added time_cost_hours column")
+            except Exception as e:
+                logger.debug(f"time_cost_hours column might already exist: {e}")
+
+            logger.info("Frustration indexing migration completed")
 
     def _create_vector_index(self) -> None:
         """Create vector index for memory embeddings."""

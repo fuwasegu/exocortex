@@ -55,6 +55,8 @@ Search for relevant past knowledge.
 | `context_name` | Project/situation name | `"my-webapp"`, `"api-server"` |
 | `tags` | Related keywords | `["laravel", "ddd", "architecture"]` |
 | `memory_type` | Type of memory | `insight`, `success`, `failure`, `decision`, `note` |
+| `is_painful` | 🔥 Painful memory flag (optional) | `true` to prioritize as a debugging nightmare |
+| `time_cost_hours` | Time spent (optional) | `3.0` to record 3 hours |
 
 **Effective Usage:**
 
@@ -73,6 +75,21 @@ Applied Y pattern
 # ❌ Bad: Vague content
 It worked somehow
 ```
+
+**🔥 Storing Painful Memories:**
+
+```markdown
+# ✅ Good: Explicitly mark debugging struggles
+💬 "This bug took 3 hours to fix, remember it"
+
+🤖 AI: exo_store_memory(
+    content="...",
+    is_painful=True,
+    time_cost_hours=3.0
+)
+```
+
+Content with "nightmare", "stuck", or "frustrated" is auto-detected, but explicitly setting `is_painful=True` ensures priority.
 
 ---
 
@@ -254,6 +271,8 @@ Diagnose knowledge base health.
 | Bug fix | "Save this bug and solution" |
 | Learning | "Store what I learned today" |
 | Failure | "Record this failure for future reference" |
+| 🔥 Debugging struggle | "This took 3 hours to debug, save it as a painful memory" |
+| 🔥 Hard-won solution | "This was a nightmare, remember it so we don't repeat it" |
 
 ### When Searching Memories
 
@@ -310,6 +329,31 @@ Things to watch out for
 - **New insight** → Link to existing related memory with `extends`
 - **Conflicting info** → Link with `contradicts`, keep both
 - **Updated info** → Create new memory, link with `supersedes`
+
+### 🔥 Frustration Indexing (Somatic Marker Hypothesis)
+
+**"Painful memories are prioritized in decision-making"** — backed by neuroscience.
+
+- **Debugging struggles** → Save with `is_painful=True` → Boosted in search
+- **Time-consuming problems** → Record `time_cost_hours` → Affects frustration score
+- Content with "nightmare", "stuck", "frustrated", "impossible" is auto-detected
+
+```
+# More 🔥 = Higher priority
+🔥🔥🔥 extreme (0.8-1.0): Never want to repeat
+🔥🔥   high    (0.6-0.8): Really struggled
+🔥     medium  (0.4-0.6): Moderately frustrating
+😓     low     (0.2-0.4): Slightly tricky
+```
+
+**Example Prompts:**
+```
+💬 "Have I been stuck on a similar bug before?"
+    → Painful memories surface first 🔥
+
+💬 "This was hell to debug... remember it"
+    → Auto-detected as high frustration
+```
 
 ---
 

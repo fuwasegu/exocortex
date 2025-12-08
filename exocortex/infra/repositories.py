@@ -170,15 +170,17 @@ class MemoryRepository:
 
         Row format with content (include_content=True):
             (id, content, summary, memory_type, created_at, updated_at,
-             last_accessed_at, access_count, decay_rate, context, tags)
+             last_accessed_at, access_count, decay_rate,
+             frustration_score, time_cost_hours, context, tags)
 
         Row format without content (include_content=False):
             (id, summary, memory_type, created_at, updated_at,
-             last_accessed_at, access_count, decay_rate, context, tags)
+             last_accessed_at, access_count, decay_rate,
+             frustration_score, time_cost_hours, context, tags)
         """
         if include_content:
-            # Full row with dynamics fields
-            tags = [t for t in row[10] if t] if row[10] else []
+            # Full row with dynamics and frustration fields
+            tags = [t for t in row[12] if t] if row[12] else []
             return MemoryWithContext(
                 id=row[0],
                 content=row[1],
@@ -189,14 +191,16 @@ class MemoryRepository:
                 last_accessed_at=row[6],
                 access_count=row[7] if row[7] is not None else 1,
                 decay_rate=row[8] if row[8] is not None else 0.1,
-                context=row[9],
+                frustration_score=row[9] if row[9] is not None else 0.0,
+                time_cost_hours=row[10],
+                context=row[11],
                 tags=tags,
                 similarity=similarity,
                 related_memories=related_memories or [],
             )
         else:
-            # Summary row with dynamics fields
-            tags = [t for t in row[9] if t] if row[9] else []
+            # Summary row with dynamics and frustration fields
+            tags = [t for t in row[11] if t] if row[11] else []
             return MemoryWithContext(
                 id=row[0],
                 content="",
@@ -207,7 +211,9 @@ class MemoryRepository:
                 last_accessed_at=row[5],
                 access_count=row[6] if row[6] is not None else 1,
                 decay_rate=row[7] if row[7] is not None else 0.1,
-                context=row[8],
+                frustration_score=row[8] if row[8] is not None else 0.0,
+                time_cost_hours=row[9],
+                context=row[10],
                 tags=tags,
                 similarity=similarity,
                 related_memories=related_memories or [],
@@ -223,6 +229,8 @@ class MemoryRepository:
         context_name: str,
         tags: list[str],
         memory_type: MemoryType,
+        frustration_score: float = 0.0,
+        time_cost_hours: float | None = None,
     ) -> tuple[str, str, list[float]]:
         """Create a new memory in the database.
 
@@ -231,6 +239,8 @@ class MemoryRepository:
             context_name: Context/project name.
             tags: List of tags.
             memory_type: Type of memory.
+            frustration_score: Emotional intensity score (0.0-1.0).
+            time_cost_hours: Estimated time spent on this problem.
 
         Returns:
             Tuple of (memory_id, summary, embedding).
@@ -253,7 +263,9 @@ class MemoryRepository:
                 updated_at: $updated_at,
                 last_accessed_at: $last_accessed_at,
                 access_count: $access_count,
-                decay_rate: $decay_rate
+                decay_rate: $decay_rate,
+                frustration_score: $frustration_score,
+                time_cost_hours: $time_cost_hours
             })
             """,
             parameters={
@@ -267,6 +279,8 @@ class MemoryRepository:
                 "last_accessed_at": now,  # Initially set to creation time
                 "access_count": 1,
                 "decay_rate": 0.1,  # Default decay rate
+                "frustration_score": frustration_score,
+                "time_cost_hours": time_cost_hours,
             },
         )
 
@@ -404,6 +418,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name as context, collect(t.name) as tags
             """,
             parameters={"id": memory_id},
@@ -567,25 +582,29 @@ class MemoryRepository:
     def _apply_hybrid_scoring(
         self,
         memories: list[MemoryWithContext],
-        w_vec: float = 0.6,
-        w_recency: float = 0.25,
+        w_vec: float = 0.5,
+        w_recency: float = 0.2,
         w_freq: float = 0.15,
+        w_frustration: float = 0.15,
         decay_lambda: float = 0.01,
     ) -> list[MemoryWithContext]:
         """Apply hybrid scoring algorithm to rerank memories.
 
-        Combines three signals:
+        Combines four signals (Somatic Marker Hypothesis integration):
         - S_vec: Vector similarity score (0-1)
         - S_recency: Recency score based on last_accessed_at (exponential decay)
         - S_freq: Frequency score based on access_count (logarithmic scale)
+        - S_frustration: Frustration score - painful memories are prioritized
 
-        Formula: Score = (S_vec * w_vec) + (S_recency * w_recency) + (S_freq * w_freq)
+        Formula: Score = (S_vec * w_vec) + (S_recency * w_recency) +
+                        (S_freq * w_freq) + (S_frustration * w_frustration)
 
         Args:
             memories: List of memories to rerank.
-            w_vec: Weight for vector similarity (default: 0.6).
-            w_recency: Weight for recency score (default: 0.25).
+            w_vec: Weight for vector similarity (default: 0.5).
+            w_recency: Weight for recency score (default: 0.2).
             w_freq: Weight for frequency score (default: 0.15).
+            w_frustration: Weight for frustration score (default: 0.15).
             decay_lambda: Decay rate for recency calculation (default: 0.01 per day).
 
         Returns:
@@ -616,15 +635,27 @@ class MemoryRepository:
                 math.log(1 + access_count) / max_log_access if max_log_access > 0 else 0
             )
 
-            # Combined hybrid score
-            hybrid_score = (s_vec * w_vec) + (s_recency * w_recency) + (s_freq * w_freq)
+            # S_frustration: Frustration score (Somatic Marker Hypothesis)
+            # Painful memories should be prioritized in decision-making
+            s_frustration = (
+                memory.frustration_score if memory.frustration_score else 0.0
+            )
+
+            # Combined hybrid score with frustration boost
+            hybrid_score = (
+                (s_vec * w_vec)
+                + (s_recency * w_recency)
+                + (s_freq * w_freq)
+                + (s_frustration * w_frustration)
+            )
 
             # Store original similarity for transparency, but sort by hybrid score
             scored_memories.append((hybrid_score, memory))
 
             logger.debug(
                 f"Memory {memory.id[:8]}... hybrid={hybrid_score:.3f} "
-                f"(vec={s_vec:.3f}, recency={s_recency:.3f}, freq={s_freq:.3f})"
+                f"(vec={s_vec:.3f}, recency={s_recency:.3f}, "
+                f"freq={s_freq:.3f}, frustration={s_frustration:.3f})"
             )
 
         # Sort by hybrid score (descending)
@@ -736,7 +767,7 @@ class MemoryRepository:
         count_result = self._execute_read(count_query, parameters=params)
         total_count = count_result.get_next()[0] if count_result.has_next() else 0
 
-        # Get memories with dynamics fields
+        # Get memories with dynamics and frustration fields
         query = f"""
             MATCH (m:Memory)
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
@@ -745,6 +776,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name as context, collect(t.name) as tags
             ORDER BY m.created_at DESC
             SKIP $offset LIMIT $limit
@@ -757,7 +789,7 @@ class MemoryRepository:
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[10] if t]
+            tags = [t for t in row[12] if t]  # Updated index for tags
 
             if tag_filter:
                 tag_set = set(tags)
@@ -817,6 +849,7 @@ class MemoryRepository:
             RETURN linked.id, linked.content, linked.summary, linked.memory_type,
                    linked.created_at, linked.updated_at,
                    linked.last_accessed_at, linked.access_count, linked.decay_rate,
+                   linked.frustration_score, linked.time_cost_hours,
                    c.name, collect(t.name) as tags, r.relation_type, r.reason
             LIMIT $limit
             """,
@@ -825,7 +858,7 @@ class MemoryRepository:
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[10] if t]
+            tags = [t for t in row[12] if t]
             memory = MemoryWithContext(
                 id=row[0],
                 content=row[1],
@@ -836,13 +869,15 @@ class MemoryRepository:
                 last_accessed_at=row[6],
                 access_count=row[7] if row[7] is not None else 1,
                 decay_rate=row[8] if row[8] is not None else 0.1,
-                context=row[9],
+                frustration_score=row[9] if row[9] is not None else 0.0,
+                time_cost_hours=row[10],
+                context=row[11],
                 tags=tags,
                 related_memories=[
                     MemoryLink(
                         target_id=memory_id,
-                        relation_type=RelationType(row[11]),
-                        reason=row[12] if row[12] else None,
+                        relation_type=RelationType(row[13]),
+                        reason=row[14] if row[14] else None,
                     )
                 ],
             )
@@ -861,6 +896,7 @@ class MemoryRepository:
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
                        sibling.created_at, sibling.updated_at,
                        sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       sibling.frustration_score, sibling.time_cost_hours,
                        c.name, all_tags, shared_tags
                 ORDER BY size(shared_tags) DESC
                 LIMIT $limit
@@ -886,6 +922,7 @@ class MemoryRepository:
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
                        sibling.created_at, sibling.updated_at,
                        sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       sibling.frustration_score, sibling.time_cost_hours,
                        c.name, collect(t.name) as tags
                 ORDER BY sibling.created_at DESC
                 LIMIT $limit
@@ -1515,6 +1552,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name, collect(DISTINCT all_tags.name) as tags
             ORDER BY m.access_count DESC
             LIMIT $limit
@@ -1552,6 +1590,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name, collect(t.name) as tags
             ORDER BY m.access_count DESC
             LIMIT $limit

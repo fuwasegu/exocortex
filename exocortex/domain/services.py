@@ -73,6 +73,8 @@ class MemoryService:
         tags: list[str],
         memory_type: MemoryType = MemoryType.INSIGHT,
         auto_analyze: bool = True,
+        is_painful: bool | None = None,
+        time_cost_hours: float | None = None,
     ) -> StoreMemoryResult:
         """Store a new memory with automatic knowledge analysis.
 
@@ -82,6 +84,8 @@ class MemoryService:
             tags: List of tags.
             memory_type: Type of memory.
             auto_analyze: Whether to analyze for similar memories.
+            is_painful: Explicit flag for frustrating memories.
+            time_cost_hours: Explicit time spent on the problem.
 
         Returns:
             StoreMemoryResult with suggestions and insights.
@@ -91,11 +95,23 @@ class MemoryService:
         """
         self._validate_input(content, context_name, tags)
 
+        # Calculate frustration index using Amygdala module
+        from exocortex.brain.amygdala import FrustrationIndexer
+
+        indexer = FrustrationIndexer()
+        frustration_index = indexer.index(
+            content=content,
+            is_painful=is_painful,
+            time_cost_hours=time_cost_hours,
+        )
+
         memory_id, summary, embedding = self._repo.create_memory(
             content=content,
             context_name=context_name,
             tags=tags,
             memory_type=memory_type,
+            frustration_score=frustration_index.frustration_score,
+            time_cost_hours=frustration_index.time_cost_hours,
         )
 
         suggested_links: list[SuggestedLink] = []

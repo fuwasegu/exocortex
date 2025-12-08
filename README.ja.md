@@ -45,6 +45,7 @@ Exocortexのアプローチ（集中型）:
 - 🔗 **記憶のリンク**: 関連する記憶を明示的に接続し、知識ネットワークを構築
 - ⚡ **軽量・高速**: 組み込みDB（KùzuDB）と軽量Embeddingモデル（fastembed）を採用
 - 🧠 **Memory Dynamics**: 鮮度と頻度に基づくスマートな想起—頻繁にアクセスされる記憶が上位に
+- 🔥 **Frustration Indexing**: 「痛みの記憶」を優先—ハマった経験は検索時にブーストされる
 - 🖥️ **Webダッシュボード**: サイバーパンク風のUIで記憶の閲覧、健全性の監視、知識グラフの可視化が可能
 
 ## 📚 使い方ガイド
@@ -174,8 +175,8 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | ツール | 説明 |
 |--------|------|
 | `exo_ping` | サーバーの疎通確認 |
-| `exo_store_memory` | 新しい記憶を保存 |
-| `exo_recall_memories` | セマンティック検索で関連する記憶を想起 |
+| `exo_store_memory` | 新しい記憶を保存（`is_painful`フラグで痛みの記憶をマーク可能） |
+| `exo_recall_memories` | セマンティック検索で関連する記憶を想起（痛みの記憶は優先表示🔥） |
 | `exo_list_memories` | 記憶の一覧を取得（ページネーション対応） |
 | `exo_get_memory` | IDを指定して特定の記憶を取得 |
 | `exo_delete_memory` | 記憶を削除 |
@@ -361,25 +362,68 @@ Exocortexは人間の認知にインスパイアされた**Memory Dynamics**シ�
 **ハイブリッドスコアリング式：**
 
 ```
-Score = (S_vec × w_vec) + (S_recency × w_recency) + (S_freq × w_freq)
+Score = (S_vec × w_vec) + (S_recency × w_recency) + (S_freq × w_freq) + (S_frustration × w_frustration)
 ```
 
 | コンポーネント | 説明 | デフォルト重み |
 |--------------|------|--------------|
-| `S_vec` | ベクトル類似度（意味的関連性） | 0.60 |
-| `S_recency` | 鮮度スコア（指数減衰: e^(-λ×Δt)） | 0.25 |
+| `S_vec` | ベクトル類似度（意味的関連性） | 0.50 |
+| `S_recency` | 鮮度スコア（指数減衰: e^(-λ×Δt)） | 0.20 |
 | `S_freq` | 頻度スコア（対数スケール: log(1 + count)） | 0.15 |
+| `S_frustration` | フラストレーションスコア（痛みの記憶ブースト） | 0.15 |
 
 **仕組み：**
 - 記憶が想起されるたびに、`last_accessed_at`と`access_count`が更新される
 - 頻繁にアクセスされる記憶は高い`S_freq`スコアを獲得
 - 最近アクセスされた記憶は高い`S_recency`スコアを獲得
+- **痛みの記憶**（ハマった経験）は高い`S_frustration`スコアで優先される
 - 古い未使用の記憶は自然に減衰するが、検索可能なまま
 
 これにより、以下のようなインテリジェントな想起システムが実現：
 - 📈 重要な記憶（頻繁に使用）は目立ち続ける
 - ⏰ 最近のコンテキストが優先される
+- 🔥 **痛みの記憶は忘れない**—同じミスを繰り返さないために
 - 🗃️ 古い記憶は緩やかにフェードするが消えない
+
+### Frustration Indexing（ソマティック・マーカー仮説）
+
+**「痛みを伴う記憶は意思決定において優先される」**という脳科学の知見に基づき、デバッグでハマった経験や苦労した記録を自動的に重要度を高めて管理します。
+
+**使い方：**
+
+```python
+# 明示的に「痛みの記憶」としてマーク
+exo_store_memory(
+    content="KùzuDBのロックで3時間ハマった。原因は...",
+    context_name="exocortex",
+    tags=["bug", "kuzu"],
+    is_painful=True,          # ← これが重要！
+    time_cost_hours=3.0       # ← かかった時間も記録可能
+)
+```
+
+**自動検出：**
+`is_painful`を指定しなくても、内容から自動的にフラストレーションレベルを検出します：
+
+- 😓 **低** (0.2-0.4): 「tricky」「weird」「workaround」
+- 🔥 **中** (0.4-0.6): 「finally」「bug」「hours」「時間かかった」
+- 🔥🔥 **高** (0.6-0.8): 「stuck」「frustrated」「ハマった」
+- 🔥🔥🔥 **極** (0.8-1.0): 「nightmare」「impossible」「最悪」「地獄」
+
+**検索結果での表示：**
+```json
+{
+  "memories": [
+    {
+      "id": "...",
+      "summary": "KùzuDBロック問題の解決",
+      "frustration_score": 0.85,
+      "pain_indicator": "🔥🔥🔥",   // ← 視覚的に強調
+      "time_cost_hours": 3.0
+    }
+  ]
+}
+```
 
 ### Sleep/Dream メカニズム
 
