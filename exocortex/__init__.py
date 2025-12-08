@@ -5,3 +5,4 @@ storing and retrieving development insights across projects.
 """
 
 __version__ = "0.1.0"
+

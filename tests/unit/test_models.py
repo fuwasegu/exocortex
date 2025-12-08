@@ -184,3 +184,4 @@ class TestStoreMemoryResult:
         assert len(result.insights) == 1
         assert result.suggested_links[0].target_id == "target-456"
         assert result.insights[0].insight_type == "success_after_failure"
+
