@@ -35,7 +35,11 @@ class RelationType(str, Enum):
 
 
 class Memory(BaseModel):
-    """A memory stored in Exocortex."""
+    """A memory stored in Exocortex.
+
+    Includes Memory Dynamics fields for tracking recency and frequency,
+    enabling smart recall scoring based on temporal and access patterns.
+    """
 
     id: str = Field(..., description="Unique identifier (UUID)")
     content: str = Field(..., description="Full content of the memory (Markdown)")
@@ -45,6 +49,17 @@ class Memory(BaseModel):
     )
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
+    # Memory Dynamics fields (Phase 1)
+    last_accessed_at: datetime | None = Field(
+        default=None, description="Last time this memory was accessed/recalled"
+    )
+    access_count: int = Field(
+        default=1, description="Number of times this memory has been accessed"
+    )
+    decay_rate: float = Field(
+        default=0.1,
+        description="Memory decay rate (0.0-1.0). Higher = faster forgetting",
+    )
 
 
 class MemoryLink(BaseModel):
@@ -82,6 +97,67 @@ class Tag(BaseModel):
 
     name: str = Field(..., description="Tag name (primary key)")
     created_at: datetime = Field(..., description="Creation timestamp")
+
+
+# =============================================================================
+# Pattern/Abstraction Models (Phase 2)
+# =============================================================================
+
+
+class Pattern(BaseModel):
+    """An abstract pattern/rule extracted from concrete memories.
+
+    Patterns represent generalized insights discovered by analyzing
+    clusters of similar memories. They form a higher level of abstraction
+    in the knowledge hierarchy.
+
+    Examples:
+    - "Always use connection pooling for database connections"
+    - "Prefer composition over inheritance in TypeScript"
+    - "Check environment variables before deployment"
+    """
+
+    id: str = Field(..., description="Unique identifier (UUID)")
+    content: str = Field(
+        ..., description="Full description of the pattern/rule (Markdown)"
+    )
+    summary: str = Field(..., description="Brief summary for search results")
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score (0.0-1.0). Higher = more instances confirm this pattern",
+    )
+    instance_count: int = Field(
+        default=1, description="Number of memories that exemplify this pattern"
+    )
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+
+
+class PatternInstance(BaseModel):
+    """A link between a Memory and a Pattern it exemplifies."""
+
+    memory_id: str = Field(..., description="Memory ID (instance)")
+    pattern_id: str = Field(..., description="Pattern ID (abstract rule)")
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="How strongly this memory exemplifies the pattern",
+    )
+    created_at: datetime = Field(..., description="When the link was created")
+
+
+class PatternWithInstances(Pattern):
+    """A Pattern with its associated memory instances."""
+
+    instances: list[MemoryWithContext] = Field(
+        default_factory=list, description="Memories that exemplify this pattern"
+    )
+    tags: list[str] = Field(
+        default_factory=list, description="Tags derived from instance memories"
+    )
 
 
 # =============================================================================

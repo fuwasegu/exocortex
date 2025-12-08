@@ -819,3 +819,115 @@ def analyze_knowledge() -> dict[str, Any]:
         "suggestions": result.suggestions,
         "stats": result.stats,
     }
+
+
+@mcp.tool(name="exo_sleep")
+def sleep(enable_logging: bool = False) -> dict[str, Any]:
+    """Trigger background consolidation process (Sleep/Dream mechanism).
+
+    Spawns a detached worker process that:
+    1. Deduplication: Detect and link highly similar memories (similarity >= 95%)
+    2. Orphan Rescue: Find isolated memories and link to related ones
+    3. Pattern Mining: (Phase 2) Extract patterns from frequently accessed topics
+
+    Use this when:
+    - A task is completed
+    - Before ending the session
+    - After storing many memories at once
+
+    The worker runs in the background and does NOT block this call.
+    If the database is in use, the worker will wait or exit gracefully.
+
+    Args:
+        enable_logging: If True, worker logs are written to ~/.exocortex/logs/dream.log
+
+    Returns:
+        Status indicating whether the worker was spawned.
+    """
+    from .config import get_config
+    from .worker.process import (
+        get_default_log_path,
+        is_dreamer_running,
+        spawn_detached_dreamer,
+    )
+
+    config = get_config()
+    lock_path = config.data_dir / "dream.lock"
+
+    # Check if a worker is already running
+    if is_dreamer_running(lock_path):
+        return {
+            "success": True,
+            "message": "Dream worker is already running",
+            "status": "already_running",
+        }
+
+    # Spawn the worker
+    log_path = get_default_log_path() if enable_logging else None
+    spawned = spawn_detached_dreamer(log_file=log_path)
+
+    if spawned:
+        return {
+            "success": True,
+            "message": "Dream worker spawned successfully. Consolidation will run in background.",
+            "status": "spawned",
+            "log_file": str(log_path) if log_path else None,
+        }
+    else:
+        return {
+            "success": False,
+            "message": "Failed to spawn dream worker. Check logs for details.",
+            "status": "failed",
+        }
+
+
+@mcp.tool(name="exo_consolidate")
+def consolidate(
+    tag_filter: str | None = None,
+    min_cluster_size: int = 3,
+) -> dict[str, Any]:
+    """Extract patterns from clusters of similar memories.
+
+    This implements the "Abstraction" mechanism (Phase 2) that:
+    1. Finds clusters of similar memories (by tag or similarity)
+    2. Identifies common patterns/rules across the cluster
+    3. Creates Pattern nodes and links instances
+
+    Patterns are abstract rules/insights extracted from concrete memories.
+    Example patterns:
+    - "Always use connection pooling for database connections"
+    - "Check environment variables before deployment"
+
+    Use this to:
+    - Discover common patterns in your knowledge base
+    - Create hierarchical knowledge (concrete → abstract)
+    - Find generalizable insights from specific experiences
+
+    Args:
+        tag_filter: Optional tag to focus pattern extraction (e.g., "bugfix", "performance").
+                    If not provided, focuses on frequently accessed memories.
+        min_cluster_size: Minimum memories to form a pattern (default: 3).
+
+    Returns:
+        Summary of patterns found/created.
+    """
+    container = get_container()
+
+    result = container.memory_service.consolidate_patterns(
+        tag_filter=tag_filter,
+        min_cluster_size=min_cluster_size,
+        similarity_threshold=0.7,
+    )
+
+    return {
+        "success": True,
+        "patterns_found": result["patterns_found"],
+        "patterns_created": result["patterns_created"],
+        "memories_linked": result["memories_linked"],
+        "details": result["details"],
+        "message": (
+            f"Consolidation complete: {result['patterns_created']} new patterns created, "
+            f"{result['patterns_found']} existing patterns strengthened, "
+            f"{result['memories_linked']} memories linked."
+        ),
+    }

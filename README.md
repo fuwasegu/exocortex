@@ -44,6 +44,7 @@ Exocortex approach (centralized):
 - 🕸️ **Knowledge Graph**: Maintains relationships between projects, tags, and memories with explicit links.
 - 🔗 **Memory Links**: Connect related memories to build a traversable knowledge network.
 - ⚡ **Lightweight & Fast**: Uses embedded KùzuDB and lightweight fastembed models.
+- 🧠 **Memory Dynamics**: Smart recall based on recency and frequency—frequently accessed memories surface higher.
 
 ## Installation
 
@@ -178,6 +179,8 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_explore_related` | Discover related memories via graph traversal |
 | `exo_get_memory_links` | Get all outgoing links from a memory |
 | `exo_analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
+| `exo_sleep` | Trigger background consolidation (deduplication, orphan rescue) |
+| `exo_consolidate` | Extract abstract patterns from memory clusters |
 
 ### 🤖 Knowledge Autonomy
 
@@ -338,6 +341,115 @@ Memory ─── ORIGINATED_IN ──► Context (project)
 Memory ─── TAGGED_WITH ────► Tag
 Memory ─── RELATED_TO ─────► Memory (with relation type)
 ```
+
+### Memory Dynamics
+
+Exocortex implements a **Memory Dynamics** system inspired by human cognition. Memories have "lifespan" and "strength" that affect search results:
+
+**Hybrid Scoring Formula:**
+
+```
+Score = (S_vec × w_vec) + (S_recency × w_recency) + (S_freq × w_freq)
+```
+
+| Component | Description | Default Weight |
+|-----------|-------------|----------------|
+| `S_vec` | Vector similarity (semantic relevance) | 0.60 |
+| `S_recency` | Recency score (exponential decay: e^(-λ×Δt)) | 0.25 |
+| `S_freq` | Frequency score (log scale: log(1 + count)) | 0.15 |
+
+**How it works:**
+- Every time a memory is recalled, its `last_accessed_at` and `access_count` are updated
+- Frequently accessed memories gain higher `S_freq` scores
+- Recently accessed memories gain higher `S_recency` scores
+- Old, unused memories naturally decay but remain searchable
+
+This creates an intelligent recall system where:
+- 📈 Important memories (frequently used) stay prominent
+- ⏰ Recent context is prioritized
+- 🗃️ Old memories gracefully fade but don't disappear
+
+### Sleep/Dream Mechanism
+
+Like human sleep consolidates memories, Exocortex has a **background consolidation process** that organizes your knowledge graph:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    exo_sleep() called                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Dream Worker (Detached Process)                 │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ 1. Deduplication                                      │   │
+│  │    - Find memories with similarity >= 95%             │   │
+│  │    - Link newer → older with 'supersedes' relation    │   │
+│  ├──────────────────────────────────────────────────────┤   │
+│  │ 2. Orphan Rescue                                      │   │
+│  │    - Find memories with no tags and no links          │   │
+│  │    - Link to most similar memory with 'related'       │   │
+│  ├──────────────────────────────────────────────────────┤   │
+│  │ 3. Pattern Mining (Phase 2)                           │   │
+│  │    - Extract common patterns from memory clusters     │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Usage:**
+```
+AI: "I've completed the task. Let me consolidate the knowledge base."
+    ↓
+AI: exo_sleep() → Worker spawns in background
+    ↓
+AI: "Consolidation process started. Your knowledge graph will be optimized."
+```
+
+**Key Features:**
+- 🔄 **Non-blocking**: Returns immediately, consolidation runs in background
+- 🔐 **Safe**: Uses file locking to avoid conflicts with active sessions
+- 📊 **Logs**: Enable logging with `enable_logging=True` to track progress
+
+> ⚠️ **Warning for Proxy Mode**: When using proxy mode (`--mode proxy`), `exo_sleep` is **NOT recommended**. In proxy mode, the SSE server maintains a constant connection to KùzuDB. The Dream Worker spawned in the background cannot access the database and will timeout or cause conflicts.
+>
+> **Workarounds:**
+> - Don't use `exo_sleep` in proxy mode
+> - Use it in stdio mode before ending a session
+> - Manually stop the SSE server before running
+
+### Pattern Abstraction (Concept Formation)
+
+Exocortex can extract **abstract patterns** from concrete memories, creating a hierarchical knowledge structure:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Pattern Layer                            │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ "Always use connection pooling for database connections"   │  │
+│  │ Confidence: 0.85 | Instances: 5                           │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                    ▲ INSTANCE_OF    ▲ INSTANCE_OF
+       ┌────────────┴────────────────┴────────────┐
+┌──────┴──────┐  ┌───────────┐  ┌───────────┐  ┌──┴────────┐
+│ Memory #1   │  │ Memory #2 │  │ Memory #3 │  │ Memory #4 │
+│ PostgreSQL  │  │ MySQL     │  │ Redis     │  │ MongoDB   │
+│ pooling fix │  │ pool size │  │ conn reuse│  │ pool leak │
+└─────────────┘  └───────────┘  └───────────┘  └───────────┘
+                     Memory Layer (Concrete)
+```
+
+**Usage:**
+```
+AI: exo_consolidate(tag_filter="database") → Extracts patterns from database-related memories
+    ↓
+Result: "Created 2 patterns from 8 memories"
+```
+
+**Benefits:**
+- 🎯 **Generalization**: Discover rules that apply across specific cases
+- 🔍 **Meta-learning**: Find what works (and what doesn't) across projects
+- 📈 **Confidence Building**: Patterns get stronger as more instances are linked
 
 ## Documentation
 
