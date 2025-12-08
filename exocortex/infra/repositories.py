@@ -849,6 +849,7 @@ class MemoryRepository:
             RETURN linked.id, linked.content, linked.summary, linked.memory_type,
                    linked.created_at, linked.updated_at,
                    linked.last_accessed_at, linked.access_count, linked.decay_rate,
+                   linked.frustration_score, linked.time_cost_hours,
                    c.name, collect(t.name) as tags, r.relation_type, r.reason
             LIMIT $limit
             """,
@@ -857,7 +858,7 @@ class MemoryRepository:
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[10] if t]
+            tags = [t for t in row[12] if t]
             memory = MemoryWithContext(
                 id=row[0],
                 content=row[1],
@@ -868,13 +869,15 @@ class MemoryRepository:
                 last_accessed_at=row[6],
                 access_count=row[7] if row[7] is not None else 1,
                 decay_rate=row[8] if row[8] is not None else 0.1,
-                context=row[9],
+                frustration_score=row[9] if row[9] is not None else 0.0,
+                time_cost_hours=row[10],
+                context=row[11],
                 tags=tags,
                 related_memories=[
                     MemoryLink(
                         target_id=memory_id,
-                        relation_type=RelationType(row[11]),
-                        reason=row[12] if row[12] else None,
+                        relation_type=RelationType(row[13]),
+                        reason=row[14] if row[14] else None,
                     )
                 ],
             )
@@ -893,6 +896,7 @@ class MemoryRepository:
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
                        sibling.created_at, sibling.updated_at,
                        sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       sibling.frustration_score, sibling.time_cost_hours,
                        c.name, all_tags, shared_tags
                 ORDER BY size(shared_tags) DESC
                 LIMIT $limit
@@ -918,6 +922,7 @@ class MemoryRepository:
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
                        sibling.created_at, sibling.updated_at,
                        sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       sibling.frustration_score, sibling.time_cost_hours,
                        c.name, collect(t.name) as tags
                 ORDER BY sibling.created_at DESC
                 LIMIT $limit
@@ -1547,6 +1552,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name, collect(DISTINCT all_tags.name) as tags
             ORDER BY m.access_count DESC
             LIMIT $limit
@@ -1584,6 +1590,7 @@ class MemoryRepository:
             RETURN m.id, m.content, m.summary, m.memory_type,
                    m.created_at, m.updated_at,
                    m.last_accessed_at, m.access_count, m.decay_rate,
+                   m.frustration_score, m.time_cost_hours,
                    c.name, collect(t.name) as tags
             ORDER BY m.access_count DESC
             LIMIT $limit
