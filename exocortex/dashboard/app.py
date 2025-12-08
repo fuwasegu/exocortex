@@ -55,18 +55,20 @@ async def api_stats(request: Request) -> JSONResponse:
         # Get orphan count
         orphans = repo.get_orphan_memories()
 
-        return JSONResponse({
-            "success": True,
-            "stats": {
-                "total_memories": stats.total_memories,
-                "by_type": stats.memories_by_type,
-                "contexts_count": stats.total_contexts,
-                "tags_count": stats.total_tags,
-                "orphan_count": len(orphans),
-                "contexts": contexts[:20],  # Limit to 20
-                "tags": tags[:50],  # Limit to 50
+        return JSONResponse(
+            {
+                "success": True,
+                "stats": {
+                    "total_memories": stats.total_memories,
+                    "by_type": stats.memories_by_type,
+                    "contexts_count": stats.total_contexts,
+                    "tags_count": stats.total_tags,
+                    "orphan_count": len(orphans),
+                    "contexts": contexts[:20],  # Limit to 20
+                    "tags": tags[:50],  # Limit to 50
+                },
             }
-        })
+        )
     except Exception as e:
         logger.exception("Error getting stats")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -96,24 +98,28 @@ async def api_memories(request: Request) -> JSONResponse:
             tag_filter=tags,
         )
 
-        return JSONResponse({
-            "success": True,
-            "memories": [
-                {
-                    "id": m.id,
-                    "summary": m.summary[:200] if m.summary else m.content[:200],
-                    "context_name": m.context,  # MemoryWithContext uses 'context' not 'context_name'
-                    "memory_type": m.memory_type.value if m.memory_type else None,
-                    "tags": m.tags,
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                    "access_count": m.access_count,
-                }
-                for m in memories
-            ],
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        })
+        return JSONResponse(
+            {
+                "success": True,
+                "memories": [
+                    {
+                        "id": m.id,
+                        "summary": m.summary[:200] if m.summary else m.content[:200],
+                        "context_name": m.context,  # MemoryWithContext uses 'context' not 'context_name'
+                        "memory_type": m.memory_type.value if m.memory_type else None,
+                        "tags": m.tags,
+                        "created_at": m.created_at.isoformat()
+                        if m.created_at
+                        else None,
+                        "access_count": m.access_count,
+                    }
+                    for m in memories
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
     except Exception as e:
         logger.exception("Error listing memories")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -129,37 +135,48 @@ async def api_memory_detail(request: Request) -> JSONResponse:
         memory = repo.get_by_id(memory_id)
         if not memory:
             return JSONResponse(
-                {"success": False, "error": "Memory not found"},
-                status_code=404
+                {"success": False, "error": "Memory not found"}, status_code=404
             )
 
         # Get links
         links = repo.get_links(memory_id)
 
-        return JSONResponse({
-            "success": True,
-            "memory": {
-                "id": memory.id,
-                "content": memory.content,
-                "summary": memory.summary,
-                "context_name": memory.context,
-                "memory_type": memory.memory_type.value if memory.memory_type else None,
-                "tags": memory.tags,
-                "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
-                "access_count": memory.access_count,
-                "last_accessed_at": memory.last_accessed_at.isoformat() if memory.last_accessed_at else None,
-            },
-            "links": [
-                {
-                    "target_id": link.target_id,
-                    "target_summary": link.target_summary or "",
-                    "relation_type": link.relation_type.value if link.relation_type else None,
-                    "reason": link.reason,
-                }
-                for link in links
-            ]
-        })
+        return JSONResponse(
+            {
+                "success": True,
+                "memory": {
+                    "id": memory.id,
+                    "content": memory.content,
+                    "summary": memory.summary,
+                    "context_name": memory.context,
+                    "memory_type": memory.memory_type.value
+                    if memory.memory_type
+                    else None,
+                    "tags": memory.tags,
+                    "created_at": memory.created_at.isoformat()
+                    if memory.created_at
+                    else None,
+                    "updated_at": memory.updated_at.isoformat()
+                    if memory.updated_at
+                    else None,
+                    "access_count": memory.access_count,
+                    "last_accessed_at": memory.last_accessed_at.isoformat()
+                    if memory.last_accessed_at
+                    else None,
+                },
+                "links": [
+                    {
+                        "target_id": link.target_id,
+                        "target_summary": link.target_summary or "",
+                        "relation_type": link.relation_type.value
+                        if link.relation_type
+                        else None,
+                        "reason": link.reason,
+                    }
+                    for link in links
+                ],
+            }
+        )
     except Exception as e:
         logger.exception("Error getting memory detail")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -192,16 +209,18 @@ async def api_health(request: Request) -> JSONResponse:
         if not issues:
             suggestions.insert(0, "Your knowledge base looks healthy!")
 
-        return JSONResponse({
-            "success": True,
-            "health": {
-                "score": round(health_score, 1),
-                "total_memories": total,
-                "orphan_count": len(orphans),
-                "issues": issues,
-                "suggestions": suggestions,
+        return JSONResponse(
+            {
+                "success": True,
+                "health": {
+                    "score": round(health_score, 1),
+                    "total_memories": total,
+                    "orphan_count": len(orphans),
+                    "issues": issues,
+                    "suggestions": suggestions,
+                },
             }
-        })
+        )
     except Exception as e:
         logger.exception("Error analyzing health")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -261,7 +280,7 @@ async def stream_dream_log(request: Request) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 
@@ -279,32 +298,40 @@ async def api_graph(request: Request) -> JSONResponse:
         seen_edges = set()
 
         for memory in memories:
-            nodes.append({
-                "id": memory.id,
-                "label": (memory.summary or memory.content)[:50],
-                "type": memory.memory_type.value if memory.memory_type else "note",
-                "context": memory.context,
-            })
+            nodes.append(
+                {
+                    "id": memory.id,
+                    "label": (memory.summary or memory.content)[:50],
+                    "type": memory.memory_type.value if memory.memory_type else "note",
+                    "context": memory.context,
+                }
+            )
 
             # Get links for this memory
             memory_links = repo.get_links(memory.id)
             for link in memory_links:
                 edge_key = (memory.id, link.target_id)
                 if edge_key not in seen_edges:
-                    edges.append({
-                        "source": memory.id,
-                        "target": link.target_id,
-                        "type": link.relation_type.value if link.relation_type else "related",
-                    })
+                    edges.append(
+                        {
+                            "source": memory.id,
+                            "target": link.target_id,
+                            "type": link.relation_type.value
+                            if link.relation_type
+                            else "related",
+                        }
+                    )
                     seen_edges.add(edge_key)
 
-        return JSONResponse({
-            "success": True,
-            "graph": {
-                "nodes": nodes,
-                "edges": edges,
+        return JSONResponse(
+            {
+                "success": True,
+                "graph": {
+                    "nodes": nodes,
+                    "edges": edges,
+                },
             }
-        })
+        )
     except Exception as e:
         logger.exception("Error getting graph data")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -330,4 +357,3 @@ def create_dashboard_app() -> Starlette:
 
     app = Starlette(routes=routes)
     return app
-
