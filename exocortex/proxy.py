@@ -59,7 +59,7 @@ def read_server_pid() -> int | None:
     return None
 
 
-def is_exocortex_process(pid: int) -> bool:
+def is_exocortex_process(pid: int, port: int = 8765) -> bool:
     """Verify that the given PID is actually an Exocortex server process.
 
     This prevents killing unrelated processes that happen to have the same PID
@@ -67,6 +67,7 @@ def is_exocortex_process(pid: int) -> bool:
 
     Args:
         pid: Process ID to check.
+        port: Port the server should be listening on.
 
     Returns:
         True if the process is an Exocortex server, False otherwise.
@@ -83,7 +84,10 @@ def is_exocortex_process(pid: int) -> bool:
     if proc_cmdline.exists():
         try:
             cmdline = proc_cmdline.read_text()
-            return "exocortex" in cmdline.lower()
+            if "exocortex" in cmdline.lower():
+                return True
+            # Don't return False here - fall through to ps command
+            # The cmdline might not contain "exocortex" in some cases
         except OSError:
             pass
 
@@ -97,9 +101,11 @@ def is_exocortex_process(pid: int) -> bool:
         )
         if result.returncode == 0:
             cmdline = result.stdout.lower()
-            if "exocortex" in cmdline or "python" in cmdline:
-                # Further verify by checking if it's listening on our port
-                return is_pid_listening_on_port(pid, 8765)
+            if "exocortex" in cmdline:
+                return True
+            # If it's a python process, verify by checking if it's listening on our port
+            if "python" in cmdline:
+                return is_pid_listening_on_port(pid, port)
         return False
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
@@ -171,7 +177,7 @@ def kill_old_server(port: int = 8765) -> bool:
         return True
 
     # Safety check: Verify the PID is actually an Exocortex process
-    if not is_exocortex_process(pid):
+    if not is_exocortex_process(pid, port):
         logger.warning(
             f"PID {pid} from server.pid is NOT an Exocortex process. "
             "Cleaning up stale PID file without killing."
