@@ -51,10 +51,87 @@ def read_server_pid() -> int | None:
     pid_file = get_server_pid_file()
     if pid_file.exists():
         try:
-            return int(pid_file.read_text().strip())
-        except Exception:
-            return None
+            pid_str = pid_file.read_text().strip()
+            if pid_str:
+                return int(pid_str)
+        except (ValueError, OSError):
+            pass
     return None
+
+
+def is_exocortex_process(pid: int) -> bool:
+    """Verify that the given PID is actually an Exocortex server process.
+
+    This prevents killing unrelated processes that happen to have the same PID
+    (e.g., after a system restart).
+
+    Args:
+        pid: Process ID to check.
+
+    Returns:
+        True if the process is an Exocortex server, False otherwise.
+    """
+    try:
+        # Check if process exists
+        os.kill(pid, 0)
+    except OSError:
+        return False
+
+    # Try to verify the process is actually exocortex
+    # Method 1: Check /proc/{pid}/cmdline on Linux
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    if proc_cmdline.exists():
+        try:
+            cmdline = proc_cmdline.read_text()
+            return "exocortex" in cmdline.lower()
+        except OSError:
+            pass
+
+    # Method 2: Use ps command (works on macOS and Linux)
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            cmdline = result.stdout.lower()
+            if "exocortex" in cmdline or "python" in cmdline:
+                # Further verify by checking if it's listening on our port
+                return is_pid_listening_on_port(pid, 8765)
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # If we can't verify, be conservative and assume it's not ours
+    logger.warning(f"Could not verify PID {pid} is an Exocortex process")
+    return False
+
+
+def is_pid_listening_on_port(pid: int, port: int) -> bool:
+    """Check if a specific PID is listening on a specific port.
+
+    Args:
+        pid: Process ID to check.
+        port: Port number to check.
+
+    Returns:
+        True if the PID is listening on the port.
+    """
+    try:
+        result = subprocess.run(
+            ["lsof", "-i", f":{port}", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            listening_pids = result.stdout.strip().split("\n")
+            return str(pid) in listening_pids
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return False
 
 
 def write_server_info(pid: int) -> None:
@@ -76,21 +153,44 @@ def cleanup_server_files() -> None:
             f.unlink(missing_ok=True)
 
 
-def kill_old_server() -> bool:
+def kill_old_server(port: int = 8765) -> bool:
     """Kill the old server process if running.
+
+    This function includes safety checks to prevent killing unrelated processes
+    that might have the same PID after a system restart.
+
+    Args:
+        port: The port the server should be listening on.
 
     Returns:
         True if server was killed or wasn't running, False on error.
     """
     pid = read_server_pid()
     if pid is None:
+        logger.debug("No PID file found")
+        return True
+
+    # Safety check: Verify the PID is actually an Exocortex process
+    if not is_exocortex_process(pid):
+        logger.warning(
+            f"PID {pid} from server.pid is NOT an Exocortex process. "
+            "Cleaning up stale PID file without killing."
+        )
+        cleanup_server_files()
+        return True
+
+    # Additional safety: Verify the process is listening on our port
+    if not is_pid_listening_on_port(pid, port):
+        logger.warning(
+            f"PID {pid} is not listening on port {port}. "
+            "Cleaning up stale PID file without killing."
+        )
+        cleanup_server_files()
         return True
 
     try:
-        # Check if process exists
-        os.kill(pid, 0)
-        # Process exists, kill it
-        logger.info(f"Killing old server (PID: {pid}) for version upgrade...")
+        # Process verified, safe to kill
+        logger.info(f"Killing old Exocortex server (PID: {pid}) for version upgrade...")
         os.kill(pid, signal.SIGTERM)
 
         # Wait for process to terminate
@@ -107,11 +207,13 @@ def kill_old_server() -> bool:
         # Force kill if still running
         logger.warning("Server didn't terminate gracefully, force killing...")
         os.kill(pid, signal.SIGKILL)
+        time.sleep(0.5)
         cleanup_server_files()
         return True
 
-    except OSError:
-        # Process doesn't exist
+    except OSError as e:
+        # Process doesn't exist or permission denied
+        logger.debug(f"Process {pid} not running or inaccessible: {e}")
         cleanup_server_files()
         return True
     except Exception as e:
@@ -119,34 +221,47 @@ def kill_old_server() -> bool:
         return False
 
 
-def check_version_and_restart_if_needed(host: str, port: int) -> None:
+def check_version_and_restart_if_needed(host: str, port: int) -> bool:
     """Check if server version matches client version, restart if not.
 
     This enables automatic server updates when the client code is updated.
+
+    Args:
+        host: Server host.
+        port: Server port.
+
+    Returns:
+        True if check passed (server ready or restarted), False on error.
     """
     if not is_server_running(host, port):
-        return
+        return True
 
     server_version = read_server_version()
 
     if server_version is None:
         # Old server without version tracking, kill and restart
         logger.info("Server running without version info, restarting...")
-        kill_old_server()
+        if not kill_old_server(port):
+            logger.error("Failed to kill old server")
+            return False
         # Wait for port to be released
         time.sleep(1)
-        return
+        return True
 
     if server_version != __version__:
         logger.info(
             f"Version mismatch: server={server_version}, client={__version__}. "
             "Restarting server..."
         )
-        kill_old_server()
+        if not kill_old_server(port):
+            logger.error("Failed to kill old server for version upgrade")
+            return False
         # Wait for port to be released
         time.sleep(1)
-    else:
-        logger.info(f"Server version matches ({__version__})")
+        return True
+
+    logger.info(f"Server version matches ({__version__})")
+    return True
 
 
 def is_server_running(host: str, port: int) -> bool:
@@ -393,21 +508,43 @@ def ensure_server_and_run_proxy(host: str, port: int) -> None:
     3. If version mismatch, kills old server and starts new one
     4. If not running, starts new server
     5. Runs the proxy
+
+    Uses file locking to prevent race conditions when multiple Cursor instances
+    start simultaneously.
     """
-    # Check version and restart if needed (handles kill + cleanup)
-    check_version_and_restart_if_needed(host, port)
+    from filelock import FileLock, Timeout
 
-    if not is_server_running(host, port):
-        logger.info(f"Server not running on {host}:{port}, starting...")
-        start_background_server(host, port)
+    # Use a lock file to prevent race conditions
+    lock_file = get_server_pid_file().with_suffix(".lock")
+    lock = FileLock(lock_file, timeout=30)
 
-        if not wait_for_server(host, port, timeout=15.0):
-            logger.error("Failed to start background server")
+    try:
+        with lock:
+            # Check version and restart if needed (handles kill + cleanup)
+            if not check_version_and_restart_if_needed(host, port):
+                logger.error("Version check failed, continuing anyway...")
+
+            if not is_server_running(host, port):
+                logger.info(f"Server not running on {host}:{port}, starting...")
+                start_background_server(host, port)
+
+                if not wait_for_server(host, port, timeout=15.0):
+                    logger.error("Failed to start background server")
+                    sys.exit(1)
+
+                logger.info("Background server is ready")
+            else:
+                logger.info(f"Server already running on {host}:{port}")
+
+    except Timeout:
+        logger.warning(
+            "Could not acquire lock for server management. "
+            "Another instance may be starting the server."
+        )
+        # Wait a bit and hope the other instance started the server
+        if not wait_for_server(host, port, timeout=20.0):
+            logger.error("Server not available after waiting")
             sys.exit(1)
 
-        logger.info("Background server is ready")
-    else:
-        logger.info(f"Server already running on {host}:{port}")
-
-    # Run the proxy
+    # Run the proxy (outside the lock so multiple proxies can connect)
     run_proxy(host, port)
