@@ -241,6 +241,8 @@ def store_memory(
     context_name: str,
     tags: list[str],
     memory_type: str = "insight",
+    is_painful: bool | None = None,
+    time_cost_hours: float | None = None,
 ) -> dict[str, Any]:
     """Store a new memory in Exocortex.
 
@@ -256,6 +258,9 @@ def store_memory(
         context_name: The project or situation name.
         tags: List of related keywords/tags for categorization.
         memory_type: Type of memory (insight, success, failure, decision, note).
+        is_painful: Mark as a frustrating/painful memory (boosts priority in recall).
+            Based on Somatic Marker Hypothesis - painful memories are prioritized.
+        time_cost_hours: Time spent on this problem (hours). Used for frustration scoring.
 
     Returns:
         Success status, memory_id, summary, suggested_links, insights,
@@ -278,6 +283,8 @@ def store_memory(
             tags=tags,
             memory_type=mem_type,
             auto_analyze=True,
+            is_painful=is_painful,
+            time_cost_hours=time_cost_hours,
         )
 
         # Build next_actions for memory consolidation
@@ -426,6 +433,11 @@ def recall_memories(
         type_filter=mem_type,
     )
 
+    # Import here to avoid circular imports
+    from exocortex.brain.amygdala import FrustrationIndexer
+
+    indexer = FrustrationIndexer()
+
     return {
         "memories": [
             {
@@ -436,6 +448,9 @@ def recall_memories(
                 "context": m.context,
                 "tags": m.tags,
                 "similarity": round(m.similarity, 3) if m.similarity else None,
+                "frustration_score": round(m.frustration_score, 3) if m.frustration_score else 0.0,
+                "pain_indicator": indexer.get_pain_emoji(m.frustration_score or 0.0),
+                "time_cost_hours": m.time_cost_hours,
                 "created_at": m.created_at.isoformat(),
                 "updated_at": m.updated_at.isoformat(),
             }

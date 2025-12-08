@@ -45,6 +45,7 @@ Exocortex approach (centralized):
 - 🔗 **Memory Links**: Connect related memories to build a traversable knowledge network.
 - ⚡ **Lightweight & Fast**: Uses embedded KùzuDB and lightweight fastembed models.
 - 🧠 **Memory Dynamics**: Smart recall based on recency and frequency—frequently accessed memories surface higher.
+- 🔥 **Frustration Indexing**: Prioritize "painful memories"—debugging nightmares get boosted in search results.
 - 🖥️ **Web Dashboard**: Beautiful cyberpunk-style UI for browsing memories, monitoring health, and visualizing the knowledge graph.
 
 ## 📚 Usage Guide
@@ -361,25 +362,68 @@ Exocortex implements a **Memory Dynamics** system inspired by human cognition. M
 **Hybrid Scoring Formula:**
 
 ```
-Score = (S_vec × w_vec) + (S_recency × w_recency) + (S_freq × w_freq)
+Score = (S_vec × w_vec) + (S_recency × w_recency) + (S_freq × w_freq) + (S_frustration × w_frustration)
 ```
 
 | Component | Description | Default Weight |
 |-----------|-------------|----------------|
-| `S_vec` | Vector similarity (semantic relevance) | 0.60 |
-| `S_recency` | Recency score (exponential decay: e^(-λ×Δt)) | 0.25 |
+| `S_vec` | Vector similarity (semantic relevance) | 0.50 |
+| `S_recency` | Recency score (exponential decay: e^(-λ×Δt)) | 0.20 |
 | `S_freq` | Frequency score (log scale: log(1 + count)) | 0.15 |
+| `S_frustration` | Frustration score (painful memory boost) | 0.15 |
 
 **How it works:**
 - Every time a memory is recalled, its `last_accessed_at` and `access_count` are updated
 - Frequently accessed memories gain higher `S_freq` scores
 - Recently accessed memories gain higher `S_recency` scores
+- **Painful memories** (debugging nightmares) get higher `S_frustration` scores for priority
 - Old, unused memories naturally decay but remain searchable
 
 This creates an intelligent recall system where:
 - 📈 Important memories (frequently used) stay prominent
 - ⏰ Recent context is prioritized
+- 🔥 **Painful memories are never forgotten**—to avoid repeating mistakes
 - 🗃️ Old memories gracefully fade but don't disappear
+
+### Frustration Indexing (Somatic Marker Hypothesis)
+
+Based on the neuroscience insight that **"painful memories are prioritized in decision-making"**, Exocortex automatically boosts the importance of debugging struggles and hard-won solutions.
+
+**Usage:**
+
+```python
+# Explicitly mark as a painful memory
+exo_store_memory(
+    content="Spent 3 hours debugging KùzuDB lock issues. Root cause was...",
+    context_name="exocortex",
+    tags=["bug", "kuzu"],
+    is_painful=True,          # ← Important!
+    time_cost_hours=3.0       # ← Record time spent
+)
+```
+
+**Auto-detection:**
+Even without `is_painful`, frustration level is auto-detected from content:
+
+- 😓 **Low** (0.2-0.4): "tricky", "weird", "workaround"
+- 🔥 **Medium** (0.4-0.6): "finally", "bug", "hours"
+- 🔥🔥 **High** (0.6-0.8): "stuck", "frustrated"
+- 🔥🔥🔥 **Extreme** (0.8-1.0): "nightmare", "impossible", "hell"
+
+**Search results:**
+```json
+{
+  "memories": [
+    {
+      "id": "...",
+      "summary": "KùzuDB lock issue resolution",
+      "frustration_score": 0.85,
+      "pain_indicator": "🔥🔥🔥",   // ← Visual emphasis
+      "time_cost_hours": 3.0
+    }
+  ]
+}
+```
 
 ### Sleep/Dream Mechanism
 

@@ -60,6 +60,17 @@ class Memory(BaseModel):
         default=0.1,
         description="Memory decay rate (0.0-1.0). Higher = faster forgetting",
     )
+    # Frustration Indexing fields (Phase 2.0 - Somatic Marker Hypothesis)
+    frustration_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Emotional intensity score (0.0=calm, 1.0=extremely frustrated)",
+    )
+    time_cost_hours: float | None = Field(
+        default=None,
+        description="Estimated time spent on this problem (hours)",
+    )
 
 
 class MemoryLink(BaseModel):
