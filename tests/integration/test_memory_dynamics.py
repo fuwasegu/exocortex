@@ -6,7 +6,6 @@ Tests the full lifecycle of memory access tracking and hybrid scoring.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -132,11 +131,9 @@ class TestMemoryDynamicsIntegration:
         # Find the memories in results
         result_ids = [m.id for m in recalled]
 
+        # Both memories should appear in results
+        # Ranking depends on both vector similarity and access count
         if result1.memory_id in result_ids and result2.memory_id in result_ids:
-            idx1 = result_ids.index(result1.memory_id)
-            idx2 = result_ids.index(result2.memory_id)
-            # Memory1 (higher access count) should appear first or close
-            # This depends on vector similarity too, so we just check both appear
             assert result1.memory_id in result_ids
             assert result2.memory_id in result_ids
 

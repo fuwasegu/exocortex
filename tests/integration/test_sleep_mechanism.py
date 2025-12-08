@@ -5,14 +5,9 @@ Tests the deduplication and orphan rescue functionality.
 
 from __future__ import annotations
 
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from exocortex.config import Config
 from exocortex.container import Container
 from exocortex.domain.models import MemoryType, RelationType
 

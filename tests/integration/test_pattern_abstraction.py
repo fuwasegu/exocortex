@@ -5,13 +5,12 @@ Tests the pattern extraction and consolidation functionality.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
 from exocortex.container import Container
-from exocortex.domain.models import MemoryType, Pattern
+from exocortex.domain.models import MemoryType
 
 
 class TestPatternCreationIntegration:
@@ -217,7 +216,6 @@ class TestConsolidatePatternsIntegration:
     def test_consolidate_creates_pattern_from_cluster(self, container: Container):
         """Test that consolidation creates patterns from memory clusters."""
         service = container.memory_service
-        repo = container.repository
 
         # Create a cluster of similar memories
         for i in range(4):
