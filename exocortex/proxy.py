@@ -338,7 +338,7 @@ class StdioToSSEProxy:
     def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
-        self.server_url = f"http://{host}:{port}/sse"
+        self.server_url = f"http://{host}:{port}/mcp/sse"
         self._session = None
         self._read_stream = None
         self._write_stream = None

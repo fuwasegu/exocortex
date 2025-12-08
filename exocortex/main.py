@@ -61,10 +61,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["server", "proxy"],
+        choices=["server", "proxy", "dashboard"],
         default="server",
         help="Run mode: 'server' runs the MCP server directly, "
-        "'proxy' bridges stdio to a shared SSE server (default: server)",
+        "'proxy' bridges stdio to a shared SSE server, "
+        "'dashboard' starts the web dashboard (default: server)",
     )
     parser.add_argument(
         "--ensure-server",
@@ -88,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Port to bind to (default: from env or 8765)",
     )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=8766,
+        help="Port for dashboard web UI (default: 8766)",
+    )
     return parser.parse_args()
 
 
@@ -100,18 +107,71 @@ def run_server_mode(
     if transport == "stdio":
         mcp.run()
     elif transport in ("sse", "streamable-http"):
-        logger.info(f"Server URL: http://{host}:{port}/sse")
+        logger.info(f"MCP URL: http://{host}:{port}/mcp/sse")
+        logger.info(f"Dashboard URL: http://{host}:{port}/")
 
         # Register cleanup for PID/version files (for proxy mode auto-update)
         register_server_cleanup(config)
 
-        # Configure host and port via settings
-        mcp.settings.host = host
-        mcp.settings.port = port
-        mcp.run(transport=transport)
+        # Run integrated server with dashboard
+        _run_integrated_server(host, port, transport, logger)
     else:
         logger.error(f"Unknown transport: {transport}")
         sys.exit(1)
+
+
+def _run_integrated_server(
+    host: str, port: int, transport: str, logger: logging.Logger
+) -> None:
+    """Run MCP server with integrated dashboard."""
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+    from starlette.staticfiles import StaticFiles
+
+    from .dashboard.app import (
+        STATIC_DIR,
+        api_graph,
+        api_health,
+        api_memories,
+        api_memory_detail,
+        api_stats,
+        index,
+        stream_dream_log,
+    )
+
+    # Get MCP ASGI app based on transport type
+    mcp_app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+
+    # Dashboard routes
+    dashboard_routes = [
+        Route("/", index),
+        Route("/api/stats", api_stats),
+        Route("/api/memories", api_memories),
+        Route("/api/memories/{memory_id}", api_memory_detail),
+        Route("/api/health", api_health),
+        Route("/api/graph", api_graph),
+        Route("/api/logs/stream", stream_dream_log),
+    ]
+
+    # Build integrated app routes
+    routes = [
+        *dashboard_routes,
+        Mount("/mcp", app=mcp_app),  # MCP at /mcp (SSE at /mcp/sse)
+    ]
+
+    # Add static files if directory exists
+    if STATIC_DIR.exists():
+        routes.append(
+            Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        )
+
+    # Create integrated Starlette app
+    # Note: mcp_app is already a Starlette app, it handles its own lifespan
+    app = Starlette(routes=routes)
+
+    logger.info("Starting integrated MCP + Dashboard server...")
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def run_proxy_mode(
@@ -134,6 +194,19 @@ def run_proxy_mode(
         run_proxy(host, port)
 
 
+def run_dashboard_mode(host: str, port: int, logger: logging.Logger) -> None:
+    """Run the web dashboard."""
+    import uvicorn
+
+    from .dashboard import create_dashboard_app
+
+    logger.info(f"Starting Exocortex Dashboard on http://{host}:{port}")
+    logger.info("Open your browser to view the dashboard")
+
+    app = create_dashboard_app()
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
 def main() -> None:
     """Run the Exocortex MCP server."""
     setup_logging()
@@ -153,6 +226,8 @@ def main() -> None:
 
     if args.mode == "proxy":
         run_proxy_mode(host, port, args.ensure_server, logger)
+    elif args.mode == "dashboard":
+        run_dashboard_mode(host, args.dashboard_port, logger)
     else:
         transport = args.transport or config.server_transport
         run_server_mode(transport, host, port, config, logger)
