@@ -23,6 +23,7 @@ from ..domain.models import (
 )
 from .database import DatabaseConnection, SmartDatabaseManager
 from .embeddings import EmbeddingEngine
+from .queries import MemoryQueryBuilder
 
 if TYPE_CHECKING:
     import kuzu
@@ -411,16 +412,7 @@ class MemoryRepository:
     def get_by_id(self, memory_id: str) -> MemoryWithContext | None:
         """Get a memory by ID."""
         result = self._execute_read(
-            """
-            MATCH (m:Memory {id: $id})
-            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
-            RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at,
-                   m.last_accessed_at, m.access_count, m.decay_rate,
-                   m.frustration_score, m.time_cost_hours,
-                   c.name as context, collect(t.name) as tags
-            """,
+            MemoryQueryBuilder.get_by_id(),
             parameters={"id": memory_id},
         )
 
@@ -768,19 +760,7 @@ class MemoryRepository:
         total_count = count_result.get_next()[0] if count_result.has_next() else 0
 
         # Get memories with dynamics and frustration fields
-        query = f"""
-            MATCH (m:Memory)
-            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
-            WHERE {where_clause}
-            RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at,
-                   m.last_accessed_at, m.access_count, m.decay_rate,
-                   m.frustration_score, m.time_cost_hours,
-                   c.name as context, collect(t.name) as tags
-            ORDER BY m.created_at DESC
-            SKIP $offset LIMIT $limit
-        """
+        query = MemoryQueryBuilder.list_memories(where_clause)
         params["offset"] = offset
         params["limit"] = limit
 
@@ -842,17 +822,7 @@ class MemoryRepository:
 
         # Get directly linked memories
         result = self._execute_read(
-            """
-            MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(linked:Memory)
-            OPTIONAL MATCH (linked)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (linked)-[:TAGGED_WITH]->(t:Tag)
-            RETURN linked.id, linked.content, linked.summary, linked.memory_type,
-                   linked.created_at, linked.updated_at,
-                   linked.last_accessed_at, linked.access_count, linked.decay_rate,
-                   linked.frustration_score, linked.time_cost_hours,
-                   c.name, collect(t.name) as tags, r.relation_type, r.reason
-            LIMIT $limit
-            """,
+            MemoryQueryBuilder.explore_linked(),
             parameters={"id": memory_id, "limit": max_per_category},
         )
 
@@ -886,21 +856,7 @@ class MemoryRepository:
         # Get tag siblings
         if include_tag_siblings:
             result = self._execute_read(
-                """
-                MATCH (m:Memory {id: $id})-[:TAGGED_WITH]->(t:Tag)<-[:TAGGED_WITH]-(sibling:Memory)
-                WHERE m <> sibling
-                OPTIONAL MATCH (sibling)-[:ORIGINATED_IN]->(c:Context)
-                OPTIONAL MATCH (sibling)-[:TAGGED_WITH]->(st:Tag)
-                WITH sibling, c, collect(DISTINCT t.name) as shared_tags,
-                     collect(DISTINCT st.name) as all_tags
-                RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
-                       sibling.created_at, sibling.updated_at,
-                       sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
-                       sibling.frustration_score, sibling.time_cost_hours,
-                       c.name, all_tags, shared_tags
-                ORDER BY size(shared_tags) DESC
-                LIMIT $limit
-                """,
+                MemoryQueryBuilder.explore_tag_siblings(),
                 parameters={"id": memory_id, "limit": max_per_category},
             )
 
@@ -915,18 +871,7 @@ class MemoryRepository:
         # Get context siblings
         if include_context_siblings:
             result = self._execute_read(
-                """
-                MATCH (m:Memory {id: $id})-[:ORIGINATED_IN]->(c:Context)<-[:ORIGINATED_IN]-(sibling:Memory)
-                WHERE m <> sibling
-                OPTIONAL MATCH (sibling)-[:TAGGED_WITH]->(t:Tag)
-                RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
-                       sibling.created_at, sibling.updated_at,
-                       sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
-                       sibling.frustration_score, sibling.time_cost_hours,
-                       c.name, collect(t.name) as tags
-                ORDER BY sibling.created_at DESC
-                LIMIT $limit
-                """,
+                MemoryQueryBuilder.explore_context_siblings(),
                 parameters={"id": memory_id, "limit": max_per_category},
             )
 
@@ -1545,18 +1490,7 @@ class MemoryRepository:
             List of memories with the tag.
         """
         result = self._execute_read(
-            """
-            MATCH (m:Memory)-[:TAGGED_WITH]->(t:Tag {name: $tag})
-            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(all_tags:Tag)
-            RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at,
-                   m.last_accessed_at, m.access_count, m.decay_rate,
-                   m.frustration_score, m.time_cost_hours,
-                   c.name, collect(DISTINCT all_tags.name) as tags
-            ORDER BY m.access_count DESC
-            LIMIT $limit
-            """,
+            MemoryQueryBuilder.get_memories_by_tag(),
             parameters={"tag": tag.lower(), "limit": limit},
         )
 
@@ -1582,19 +1516,7 @@ class MemoryRepository:
             List of frequently accessed memories.
         """
         result = self._execute_read(
-            """
-            MATCH (m:Memory)
-            WHERE m.access_count >= $min_count
-            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
-            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
-            RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at,
-                   m.last_accessed_at, m.access_count, m.decay_rate,
-                   m.frustration_score, m.time_cost_hours,
-                   c.name, collect(t.name) as tags
-            ORDER BY m.access_count DESC
-            LIMIT $limit
-            """,
+            MemoryQueryBuilder.get_frequently_accessed(),
             parameters={"min_count": min_access_count, "limit": limit},
         )
 
