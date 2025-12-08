@@ -48,6 +48,25 @@ def dashboard_client():
 
 Do not use `exo_sleep` in proxy mode (`--mode proxy`). The SSE server holds the KùzuDB connection, preventing the Dream Worker from accessing it (causes timeout).
 
+### Server Auto-Update Mechanism
+
+When using proxy mode with `uvx --from git+...`, the SSE server runs in the background for extended periods. Server version tracking works as follows:
+
+1. **Version file** (`~/.exocortex/server.version`) stores the running server's version
+2. **PID file** (`~/.exocortex/server.pid`) stores the server process ID
+3. On startup, proxy compares client version with server version
+4. If mismatch, kills old server and starts new one **within the FileLock**
+
+**Critical**: When killing and restarting the server:
+- Use `lsof -ti :PORT` to find old servers without PID files
+- Keep the FileLock while killing AND starting new server
+- This prevents other Cursor instances from starting old versions
+
+```
+❌ Bad: kill → release lock → other Cursor starts old version → acquire lock → "already running"
+✅ Good: acquire lock → kill → start new server → release lock
+```
+
 ## Mocking Guidelines
 
 When mocking in tests, patch functions at the **location where they are used**, not where they are defined:
