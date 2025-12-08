@@ -61,10 +61,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["server", "proxy"],
+        choices=["server", "proxy", "dashboard"],
         default="server",
         help="Run mode: 'server' runs the MCP server directly, "
-        "'proxy' bridges stdio to a shared SSE server (default: server)",
+        "'proxy' bridges stdio to a shared SSE server, "
+        "'dashboard' starts the web dashboard (default: server)",
     )
     parser.add_argument(
         "--ensure-server",
@@ -87,6 +88,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Port to bind to (default: from env or 8765)",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=8766,
+        help="Port for dashboard web UI (default: 8766)",
     )
     return parser.parse_args()
 
@@ -134,6 +141,19 @@ def run_proxy_mode(
         run_proxy(host, port)
 
 
+def run_dashboard_mode(host: str, port: int, logger: logging.Logger) -> None:
+    """Run the web dashboard."""
+    import uvicorn
+
+    from .dashboard import create_dashboard_app
+
+    logger.info(f"Starting Exocortex Dashboard on http://{host}:{port}")
+    logger.info("Open your browser to view the dashboard")
+
+    app = create_dashboard_app()
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
 def main() -> None:
     """Run the Exocortex MCP server."""
     setup_logging()
@@ -153,6 +173,8 @@ def main() -> None:
 
     if args.mode == "proxy":
         run_proxy_mode(host, port, args.ensure_server, logger)
+    elif args.mode == "dashboard":
+        run_dashboard_mode(host, args.dashboard_port, logger)
     else:
         transport = args.transport or config.server_transport
         run_server_mode(transport, host, port, config, logger)
