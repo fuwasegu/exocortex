@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,7 @@ from ..domain.models import (
     MemoryStats,
     MemoryType,
     MemoryWithContext,
+    Pattern,
     RelationType,
 )
 from .database import DatabaseConnection, SmartDatabaseManager
@@ -164,10 +166,19 @@ class MemoryRepository:
         similarity: float | None = None,
         related_memories: list[MemoryLink] | None = None,
     ) -> MemoryWithContext:
-        """Convert a database row to MemoryWithContext."""
+        """Convert a database row to MemoryWithContext.
+
+        Row format with content (include_content=True):
+            (id, content, summary, memory_type, created_at, updated_at,
+             last_accessed_at, access_count, decay_rate, context, tags)
+
+        Row format without content (include_content=False):
+            (id, summary, memory_type, created_at, updated_at,
+             last_accessed_at, access_count, decay_rate, context, tags)
+        """
         if include_content:
-            # Full row: (id, content, summary, memory_type, created_at, updated_at, context, tags)
-            tags = [t for t in row[7] if t] if row[7] else []
+            # Full row with dynamics fields
+            tags = [t for t in row[10] if t] if row[10] else []
             return MemoryWithContext(
                 id=row[0],
                 content=row[1],
@@ -175,14 +186,17 @@ class MemoryRepository:
                 memory_type=MemoryType(row[3]),
                 created_at=row[4],
                 updated_at=row[5],
-                context=row[6],
+                last_accessed_at=row[6],
+                access_count=row[7] if row[7] is not None else 1,
+                decay_rate=row[8] if row[8] is not None else 0.1,
+                context=row[9],
                 tags=tags,
                 similarity=similarity,
                 related_memories=related_memories or [],
             )
         else:
-            # Summary row: (id, summary, memory_type, created_at, updated_at, context, tags)
-            tags = [t for t in row[6] if t] if row[6] else []
+            # Summary row with dynamics fields
+            tags = [t for t in row[9] if t] if row[9] else []
             return MemoryWithContext(
                 id=row[0],
                 content="",
@@ -190,7 +204,10 @@ class MemoryRepository:
                 memory_type=MemoryType(row[2]),
                 created_at=row[3],
                 updated_at=row[4],
-                context=row[5],
+                last_accessed_at=row[5],
+                access_count=row[6] if row[6] is not None else 1,
+                decay_rate=row[7] if row[7] is not None else 0.1,
+                context=row[8],
                 tags=tags,
                 similarity=similarity,
                 related_memories=related_memories or [],
@@ -223,7 +240,7 @@ class MemoryRepository:
         summary = self._generate_summary(content)
         embedding = self._embedding_engine.embed(content)
 
-        # Create memory node
+        # Create memory node with dynamics fields
         self._execute_write(
             """
             CREATE (m:Memory {
@@ -233,7 +250,10 @@ class MemoryRepository:
                 embedding: $embedding,
                 memory_type: $memory_type,
                 created_at: $created_at,
-                updated_at: $updated_at
+                updated_at: $updated_at,
+                last_accessed_at: $last_accessed_at,
+                access_count: $access_count,
+                decay_rate: $decay_rate
             })
             """,
             parameters={
@@ -244,6 +264,9 @@ class MemoryRepository:
                 "memory_type": memory_type.value,
                 "created_at": now,
                 "updated_at": now,
+                "last_accessed_at": now,  # Initially set to creation time
+                "access_count": 1,
+                "decay_rate": 0.1,  # Default decay rate
             },
         )
 
@@ -379,8 +402,9 @@ class MemoryRepository:
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
             OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
             RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at, c.name as context,
-                   collect(t.name) as tags
+                   m.created_at, m.updated_at,
+                   m.last_accessed_at, m.access_count, m.decay_rate,
+                   c.name as context, collect(t.name) as tags
             """,
             parameters={"id": memory_id},
         )
@@ -479,10 +503,15 @@ class MemoryRepository:
         context_filter: str | None = None,
         tag_filter: list[str] | None = None,
         type_filter: MemoryType | None = None,
+        use_hybrid_scoring: bool = True,
     ) -> tuple[list[MemoryWithContext], int]:
-        """Search memories by semantic similarity.
+        """Search memories by semantic similarity with hybrid scoring.
 
-        Uses KùzuDB's native vector index for efficient search.
+        Uses KùzuDB's native vector index for efficient search, then applies
+        a hybrid scoring algorithm combining:
+        - Vector similarity (semantic relevance)
+        - Recency (time since last access)
+        - Frequency (access count)
 
         Args:
             query: Search query.
@@ -490,17 +519,20 @@ class MemoryRepository:
             context_filter: Filter by context.
             tag_filter: Filter by tags.
             type_filter: Filter by type.
+            use_hybrid_scoring: If True, apply hybrid scoring algorithm.
 
         Returns:
             Tuple of (memories, total_found).
         """
         query_embedding = self._embedding_engine.embed(query)
 
-        # Fetch more candidates to account for filtering
-        fetch_multiplier = 3 if (context_filter or tag_filter or type_filter) else 1
+        # Fetch more candidates to account for filtering and reranking
+        fetch_multiplier = 5 if use_hybrid_scoring else 3
+        if context_filter or tag_filter or type_filter:
+            fetch_multiplier += 2
         candidates = self.search_similar_by_embedding(
             embedding=query_embedding,
-            limit=limit * fetch_multiplier + 10,
+            limit=limit * fetch_multiplier + 20,
         )
 
         memories: list[MemoryWithContext] = []
@@ -525,10 +557,152 @@ class MemoryRepository:
             full_memory.similarity = similarity
             memories.append(full_memory)
 
-            if len(memories) >= limit:
-                break
+        # Apply hybrid scoring if enabled
+        if use_hybrid_scoring and memories:
+            memories = self._apply_hybrid_scoring(memories)
 
-        return memories, len(memories)
+        # Return top N after reranking
+        return memories[:limit], len(memories[:limit])
+
+    def _apply_hybrid_scoring(
+        self,
+        memories: list[MemoryWithContext],
+        w_vec: float = 0.6,
+        w_recency: float = 0.25,
+        w_freq: float = 0.15,
+        decay_lambda: float = 0.01,
+    ) -> list[MemoryWithContext]:
+        """Apply hybrid scoring algorithm to rerank memories.
+
+        Combines three signals:
+        - S_vec: Vector similarity score (0-1)
+        - S_recency: Recency score based on last_accessed_at (exponential decay)
+        - S_freq: Frequency score based on access_count (logarithmic scale)
+
+        Formula: Score = (S_vec * w_vec) + (S_recency * w_recency) + (S_freq * w_freq)
+
+        Args:
+            memories: List of memories to rerank.
+            w_vec: Weight for vector similarity (default: 0.6).
+            w_recency: Weight for recency score (default: 0.25).
+            w_freq: Weight for frequency score (default: 0.15).
+            decay_lambda: Decay rate for recency calculation (default: 0.01 per day).
+
+        Returns:
+            Reranked list of memories with updated similarity scores.
+        """
+        now = datetime.now(timezone.utc)
+        scored_memories: list[tuple[float, MemoryWithContext]] = []
+
+        # Find max access_count for normalization
+        max_access = max((m.access_count for m in memories), default=1)
+        max_log_access = math.log(1 + max_access)
+
+        for memory in memories:
+            # S_vec: Vector similarity (already 0-1)
+            s_vec = memory.similarity if memory.similarity is not None else 0.0
+
+            # S_recency: Exponential decay based on time since last access
+            # Uses last_accessed_at if available, otherwise created_at
+            reference_time = memory.last_accessed_at or memory.created_at
+            if reference_time.tzinfo is None:
+                reference_time = reference_time.replace(tzinfo=timezone.utc)
+            delta_days = (now - reference_time).total_seconds() / 86400.0
+            s_recency = math.exp(-decay_lambda * delta_days)
+
+            # S_freq: Logarithmic scale for access count (normalized)
+            access_count = memory.access_count if memory.access_count else 1
+            s_freq = (
+                math.log(1 + access_count) / max_log_access if max_log_access > 0 else 0
+            )
+
+            # Combined hybrid score
+            hybrid_score = (s_vec * w_vec) + (s_recency * w_recency) + (s_freq * w_freq)
+
+            # Store original similarity for transparency, but sort by hybrid score
+            scored_memories.append((hybrid_score, memory))
+
+            logger.debug(
+                f"Memory {memory.id[:8]}... hybrid={hybrid_score:.3f} "
+                f"(vec={s_vec:.3f}, recency={s_recency:.3f}, freq={s_freq:.3f})"
+            )
+
+        # Sort by hybrid score (descending)
+        scored_memories.sort(key=lambda x: x[0], reverse=True)
+
+        # Update similarity field with hybrid score for transparency
+        result = []
+        for hybrid_score, memory in scored_memories:
+            memory.similarity = hybrid_score
+            result.append(memory)
+
+        return result
+
+    def touch_memory(self, memory_id: str) -> bool:
+        """Update memory access metadata (last_accessed_at, access_count).
+
+        Should be called when a memory is returned in search results or accessed.
+
+        Args:
+            memory_id: The memory ID to touch.
+
+        Returns:
+            True if successful, False if memory not found.
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            self._execute_write(
+                """
+                MATCH (m:Memory {id: $id})
+                SET m.last_accessed_at = $now,
+                    m.access_count = CASE
+                        WHEN m.access_count IS NULL THEN 1
+                        ELSE m.access_count + 1
+                    END
+                """,
+                parameters={"id": memory_id, "now": now},
+            )
+            self._release_write_lock()
+            logger.debug(f"Touched memory {memory_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to touch memory {memory_id}: {e}")
+            return False
+
+    def touch_memories(self, memory_ids: list[str]) -> int:
+        """Batch update memory access metadata for multiple memories.
+
+        Args:
+            memory_ids: List of memory IDs to touch.
+
+        Returns:
+            Number of memories successfully touched.
+        """
+        if not memory_ids:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        touched = 0
+        for memory_id in memory_ids:
+            try:
+                self._execute_write(
+                    """
+                    MATCH (m:Memory {id: $id})
+                    SET m.last_accessed_at = $now,
+                        m.access_count = CASE
+                            WHEN m.access_count IS NULL THEN 1
+                            ELSE m.access_count + 1
+                        END
+                    """,
+                    parameters={"id": memory_id, "now": now},
+                )
+                touched += 1
+            except Exception as e:
+                logger.warning(f"Failed to touch memory {memory_id}: {e}")
+
+        self._release_write_lock()
+        logger.debug(f"Touched {touched}/{len(memory_ids)} memories")
+        return touched
 
     def list_memories(
         self,
@@ -562,15 +736,16 @@ class MemoryRepository:
         count_result = self._execute_read(count_query, parameters=params)
         total_count = count_result.get_next()[0] if count_result.has_next() else 0
 
-        # Get memories
+        # Get memories with dynamics fields
         query = f"""
             MATCH (m:Memory)
             OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
             OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
             WHERE {where_clause}
             RETURN m.id, m.content, m.summary, m.memory_type,
-                   m.created_at, m.updated_at, c.name as context,
-                   collect(t.name) as tags
+                   m.created_at, m.updated_at,
+                   m.last_accessed_at, m.access_count, m.decay_rate,
+                   c.name as context, collect(t.name) as tags
             ORDER BY m.created_at DESC
             SKIP $offset LIMIT $limit
         """
@@ -582,7 +757,7 @@ class MemoryRepository:
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[7] if t]
+            tags = [t for t in row[10] if t]
 
             if tag_filter:
                 tag_set = set(tags)
@@ -640,8 +815,9 @@ class MemoryRepository:
             OPTIONAL MATCH (linked)-[:ORIGINATED_IN]->(c:Context)
             OPTIONAL MATCH (linked)-[:TAGGED_WITH]->(t:Tag)
             RETURN linked.id, linked.content, linked.summary, linked.memory_type,
-                   linked.created_at, linked.updated_at, c.name,
-                   collect(t.name) as tags, r.relation_type, r.reason
+                   linked.created_at, linked.updated_at,
+                   linked.last_accessed_at, linked.access_count, linked.decay_rate,
+                   c.name, collect(t.name) as tags, r.relation_type, r.reason
             LIMIT $limit
             """,
             parameters={"id": memory_id, "limit": max_per_category},
@@ -649,7 +825,7 @@ class MemoryRepository:
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[7] if t]
+            tags = [t for t in row[10] if t]
             memory = MemoryWithContext(
                 id=row[0],
                 content=row[1],
@@ -657,13 +833,16 @@ class MemoryRepository:
                 memory_type=MemoryType(row[3]),
                 created_at=row[4],
                 updated_at=row[5],
-                context=row[6],
+                last_accessed_at=row[6],
+                access_count=row[7] if row[7] is not None else 1,
+                decay_rate=row[8] if row[8] is not None else 0.1,
+                context=row[9],
                 tags=tags,
                 related_memories=[
                     MemoryLink(
                         target_id=memory_id,
-                        relation_type=RelationType(row[8]),
-                        reason=row[9] if row[9] else None,
+                        relation_type=RelationType(row[11]),
+                        reason=row[12] if row[12] else None,
                     )
                 ],
             )
@@ -680,7 +859,9 @@ class MemoryRepository:
                 WITH sibling, c, collect(DISTINCT t.name) as shared_tags,
                      collect(DISTINCT st.name) as all_tags
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
-                       sibling.created_at, sibling.updated_at, c.name, all_tags, shared_tags
+                       sibling.created_at, sibling.updated_at,
+                       sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       c.name, all_tags, shared_tags
                 ORDER BY size(shared_tags) DESC
                 LIMIT $limit
                 """,
@@ -703,8 +884,9 @@ class MemoryRepository:
                 WHERE m <> sibling
                 OPTIONAL MATCH (sibling)-[:TAGGED_WITH]->(t:Tag)
                 RETURN sibling.id, sibling.content, sibling.summary, sibling.memory_type,
-                       sibling.created_at, sibling.updated_at, c.name,
-                       collect(t.name) as tags
+                       sibling.created_at, sibling.updated_at,
+                       sibling.last_accessed_at, sibling.access_count, sibling.decay_rate,
+                       c.name, collect(t.name) as tags
                 ORDER BY sibling.created_at DESC
                 LIMIT $limit
                 """,
@@ -1117,4 +1299,269 @@ class MemoryRepository:
         while result.has_next():
             row = result.get_next()
             memories.append((row[0], row[1]))
+        return memories
+
+    # =========================================================================
+    # Pattern Methods (Phase 2: Concept Abstraction)
+    # =========================================================================
+
+    def create_pattern(
+        self,
+        content: str,
+        confidence: float = 0.5,
+    ) -> tuple[str, str, list[float]]:
+        """Create a new pattern in the database.
+
+        Args:
+            content: Pattern content (the generalized rule/insight).
+            confidence: Initial confidence score (0.0-1.0).
+
+        Returns:
+            Tuple of (pattern_id, summary, embedding).
+        """
+        pattern_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        summary = self._generate_summary(content)
+        embedding = self._embedding_engine.embed(content)
+
+        self._execute_write(
+            """
+            CREATE (p:Pattern {
+                id: $id,
+                content: $content,
+                summary: $summary,
+                embedding: $embedding,
+                confidence: $confidence,
+                instance_count: $instance_count,
+                created_at: $created_at,
+                updated_at: $updated_at
+            })
+            """,
+            parameters={
+                "id": pattern_id,
+                "content": content,
+                "summary": summary,
+                "embedding": embedding,
+                "confidence": confidence,
+                "instance_count": 0,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        self._release_write_lock()
+
+        logger.info(f"Created pattern {pattern_id}")
+        return pattern_id, summary, embedding
+
+    def link_memory_to_pattern(
+        self,
+        memory_id: str,
+        pattern_id: str,
+        confidence: float = 0.5,
+    ) -> bool:
+        """Link a memory as an instance of a pattern.
+
+        Args:
+            memory_id: The memory ID.
+            pattern_id: The pattern ID.
+            confidence: How strongly this memory exemplifies the pattern.
+
+        Returns:
+            True if successful.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Check if link already exists
+        result = self._execute_read(
+            """
+            MATCH (m:Memory {id: $memory_id})-[r:INSTANCE_OF]->(p:Pattern {id: $pattern_id})
+            RETURN count(r) as cnt
+            """,
+            parameters={"memory_id": memory_id, "pattern_id": pattern_id},
+        )
+        if result.has_next() and result.get_next()[0] > 0:
+            logger.debug(f"Link already exists: {memory_id} -> {pattern_id}")
+            return True
+
+        # Create the link
+        self._execute_write(
+            """
+            MATCH (m:Memory {id: $memory_id}), (p:Pattern {id: $pattern_id})
+            CREATE (m)-[:INSTANCE_OF {confidence: $confidence, created_at: $created_at}]->(p)
+            """,
+            parameters={
+                "memory_id": memory_id,
+                "pattern_id": pattern_id,
+                "confidence": confidence,
+                "created_at": now,
+            },
+        )
+
+        # Update pattern's instance count and confidence
+        self._execute_write(
+            """
+            MATCH (p:Pattern {id: $pattern_id})
+            SET p.instance_count = p.instance_count + 1,
+                p.updated_at = $now,
+                p.confidence = CASE
+                    WHEN p.confidence < 0.9 THEN p.confidence + 0.05
+                    ELSE p.confidence
+                END
+            """,
+            parameters={"pattern_id": pattern_id, "now": now},
+        )
+        self._release_write_lock()
+
+        logger.info(f"Linked memory {memory_id} to pattern {pattern_id}")
+        return True
+
+    def search_similar_patterns(
+        self,
+        embedding: list[float],
+        limit: int = 5,
+        min_confidence: float = 0.0,
+    ) -> list[tuple[str, str, float, float]]:
+        """Search for similar patterns by embedding.
+
+        Args:
+            embedding: Query embedding vector.
+            limit: Maximum results to return.
+            min_confidence: Minimum confidence threshold.
+
+        Returns:
+            List of (id, summary, similarity, confidence) tuples.
+        """
+        # KùzuDB vector search for patterns
+        try:
+            # First, try to use vector index if it exists for Pattern table
+            result = self._execute_read(
+                """
+                MATCH (p:Pattern)
+                WHERE p.confidence >= $min_confidence
+                RETURN p.id, p.summary, p.embedding, p.confidence
+                """,
+                parameters={"min_confidence": min_confidence},
+            )
+
+            # Compute similarity manually (Pattern table may not have vector index)
+            patterns = []
+            while result.has_next():
+                row = result.get_next()
+                if row[2]:  # has embedding
+                    similarity = self.compute_similarity(embedding, row[2])
+                    patterns.append((row[0], row[1], similarity, row[3]))
+
+            # Sort by similarity and return top N
+            patterns.sort(key=lambda x: x[2], reverse=True)
+            return patterns[:limit]
+
+        except Exception as e:
+            logger.warning(f"Pattern search error: {e}")
+            return []
+
+    def get_pattern_by_id(self, pattern_id: str) -> Pattern | None:
+        """Get a pattern by ID.
+
+        Args:
+            pattern_id: The pattern ID.
+
+        Returns:
+            Pattern model or None if not found.
+        """
+        from ..domain.models import Pattern
+
+        result = self._execute_read(
+            """
+            MATCH (p:Pattern {id: $id})
+            RETURN p.id, p.content, p.summary, p.confidence,
+                   p.instance_count, p.created_at, p.updated_at
+            """,
+            parameters={"id": pattern_id},
+        )
+
+        if not result.has_next():
+            return None
+
+        row = result.get_next()
+        return Pattern(
+            id=row[0],
+            content=row[1],
+            summary=row[2],
+            confidence=row[3] if row[3] is not None else 0.5,
+            instance_count=row[4] if row[4] is not None else 0,
+            created_at=row[5],
+            updated_at=row[6],
+        )
+
+    def get_memories_by_tag(
+        self,
+        tag: str,
+        limit: int = 50,
+    ) -> list[MemoryWithContext]:
+        """Get memories with a specific tag.
+
+        Args:
+            tag: Tag name to filter by.
+            limit: Maximum results.
+
+        Returns:
+            List of memories with the tag.
+        """
+        result = self._execute_read(
+            """
+            MATCH (m:Memory)-[:TAGGED_WITH]->(t:Tag {name: $tag})
+            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
+            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(all_tags:Tag)
+            RETURN m.id, m.content, m.summary, m.memory_type,
+                   m.created_at, m.updated_at,
+                   m.last_accessed_at, m.access_count, m.decay_rate,
+                   c.name, collect(DISTINCT all_tags.name) as tags
+            ORDER BY m.access_count DESC
+            LIMIT $limit
+            """,
+            parameters={"tag": tag.lower(), "limit": limit},
+        )
+
+        memories = []
+        while result.has_next():
+            row = result.get_next()
+            memories.append(self._row_to_memory(row))
+
+        return memories
+
+    def get_frequently_accessed_memories(
+        self,
+        min_access_count: int = 3,
+        limit: int = 100,
+    ) -> list[MemoryWithContext]:
+        """Get memories that are frequently accessed.
+
+        Args:
+            min_access_count: Minimum access count threshold.
+            limit: Maximum results.
+
+        Returns:
+            List of frequently accessed memories.
+        """
+        result = self._execute_read(
+            """
+            MATCH (m:Memory)
+            WHERE m.access_count >= $min_count
+            OPTIONAL MATCH (m)-[:ORIGINATED_IN]->(c:Context)
+            OPTIONAL MATCH (m)-[:TAGGED_WITH]->(t:Tag)
+            RETURN m.id, m.content, m.summary, m.memory_type,
+                   m.created_at, m.updated_at,
+                   m.last_accessed_at, m.access_count, m.decay_rate,
+                   c.name, collect(t.name) as tags
+            ORDER BY m.access_count DESC
+            LIMIT $limit
+            """,
+            parameters={"min_count": min_access_count, "limit": limit},
+        )
+
+        memories = []
+        while result.has_next():
+            row = result.get_next()
+            memories.append(self._row_to_memory(row))
+
         return memories

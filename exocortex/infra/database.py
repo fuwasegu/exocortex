@@ -93,7 +93,7 @@ class DatabaseConnection:
         logger.info("Initializing database schema...")
         dim = self._embedding_dimension
 
-        # Create Memory node table
+        # Create Memory node table with dynamics fields
         self.conn.execute(f"""
             CREATE NODE TABLE IF NOT EXISTS Memory (
                 id STRING,
@@ -103,6 +103,9 @@ class DatabaseConnection:
                 memory_type STRING,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
+                last_accessed_at TIMESTAMP,
+                access_count INT64,
+                decay_rate DOUBLE,
                 PRIMARY KEY (id)
             )
         """)
@@ -122,6 +125,22 @@ class DatabaseConnection:
                 name STRING,
                 created_at TIMESTAMP,
                 PRIMARY KEY (name)
+            )
+        """)
+
+        # Create Pattern node table (Phase 2: Concept Abstraction)
+        # Patterns represent abstract rules/insights extracted from concrete memories
+        self.conn.execute(f"""
+            CREATE NODE TABLE IF NOT EXISTS Pattern (
+                id STRING,
+                content STRING,
+                summary STRING,
+                embedding FLOAT[{dim}],
+                confidence DOUBLE,
+                instance_count INT64,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                PRIMARY KEY (id)
             )
         """)
 
@@ -148,10 +167,77 @@ class DatabaseConnection:
             )
         """)
 
+        # Create INSTANCE_OF relationship (Memory → Pattern)
+        # Links concrete memories to abstract patterns they exemplify
+        self.conn.execute("""
+            CREATE REL TABLE IF NOT EXISTS INSTANCE_OF (
+                FROM Memory TO Pattern,
+                confidence DOUBLE,
+                created_at TIMESTAMP
+            )
+        """)
+
+        # Run migrations for existing databases
+        self._migrate_schema()
+
         # Create vector index
         self._create_vector_index()
 
         logger.info("Database schema initialized successfully")
+
+    def _migrate_schema(self) -> None:
+        """Run schema migrations for existing databases.
+
+        Adds new columns to existing tables if they don't exist.
+        KùzuDB supports ALTER TABLE ADD COLUMN since v0.4.0.
+        """
+        # Migration 1: Memory dynamics columns
+        try:
+            # Try to query a dynamics column - if it fails, we need to migrate
+            result = self.conn.execute("""
+                MATCH (m:Memory) RETURN m.access_count LIMIT 1
+            """)
+            # If we got here, column exists
+            _ = result.get_next() if result.has_next() else None
+            logger.debug("Memory dynamics columns already exist")
+        except Exception:
+            # Columns don't exist, add them
+            logger.info("Migrating Memory table: adding dynamics columns...")
+
+            try:
+                self.conn.execute("""
+                    ALTER TABLE Memory ADD last_accessed_at TIMESTAMP DEFAULT NULL
+                """)
+                logger.debug("Added last_accessed_at column")
+            except Exception as e:
+                logger.debug(f"last_accessed_at column might already exist: {e}")
+
+            try:
+                self.conn.execute("""
+                    ALTER TABLE Memory ADD access_count INT64 DEFAULT 1
+                """)
+                logger.debug("Added access_count column")
+            except Exception as e:
+                logger.debug(f"access_count column might already exist: {e}")
+
+            try:
+                self.conn.execute("""
+                    ALTER TABLE Memory ADD decay_rate DOUBLE DEFAULT 0.1
+                """)
+                logger.debug("Added decay_rate column")
+            except Exception as e:
+                logger.debug(f"decay_rate column might already exist: {e}")
+
+            logger.info("Memory table migration completed")
+
+        # Migration 2: Pattern table (Phase 2)
+        # Check if Pattern table exists by trying to query it
+        try:
+            self.conn.execute("MATCH (p:Pattern) RETURN p.id LIMIT 1")
+            logger.debug("Pattern table already exists")
+        except Exception:
+            logger.info("Pattern table not found - will be created by _init_schema")
+            # Pattern table will be created by CREATE NODE TABLE IF NOT EXISTS
 
     def _create_vector_index(self) -> None:
         """Create vector index for memory embeddings."""
