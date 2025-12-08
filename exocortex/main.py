@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
+import os
 import sys
 
 from .config import get_config
@@ -17,6 +19,39 @@ def setup_logging() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         stream=sys.stderr,
     )
+
+
+def register_server_cleanup(config) -> None:
+    """Register cleanup handlers for server files on exit.
+
+    This ensures PID and version files are cleaned up when the server
+    exits normally, preventing stale PID issues.
+    """
+    from . import __version__
+
+    pid_file = config.data_dir / "server.pid"
+    version_file = config.data_dir / "server_version"
+
+    def cleanup():
+        """Remove server PID and version files on exit."""
+        logger = logging.getLogger(__name__)
+        logger.info("Server shutting down, cleaning up...")
+
+        for f in [pid_file, version_file]:
+            try:
+                if f.exists():
+                    f.unlink()
+                    logger.debug(f"Removed {f}")
+            except OSError as e:
+                logger.warning(f"Failed to remove {f}: {e}")
+
+    # Register cleanup on normal exit
+    atexit.register(cleanup)
+
+    # Write PID and version files
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(os.getpid()))
+    version_file.write_text(__version__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,7 +92,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_server_mode(
-    transport: str, host: str, port: int, logger: logging.Logger
+    transport: str, host: str, port: int, config, logger: logging.Logger
 ) -> None:
     """Run the MCP server directly."""
     logger.info(f"Transport: {transport}")
@@ -66,6 +101,10 @@ def run_server_mode(
         mcp.run()
     elif transport in ("sse", "streamable-http"):
         logger.info(f"Server URL: http://{host}:{port}/sse")
+
+        # Register cleanup for PID/version files (for proxy mode auto-update)
+        register_server_cleanup(config)
+
         # Configure host and port via settings
         mcp.settings.host = host
         mcp.settings.port = port
@@ -116,7 +155,7 @@ def main() -> None:
         run_proxy_mode(host, port, args.ensure_server, logger)
     else:
         transport = args.transport or config.server_transport
-        run_server_mode(transport, host, port, logger)
+        run_server_mode(transport, host, port, config, logger)
 
 
 if __name__ == "__main__":
