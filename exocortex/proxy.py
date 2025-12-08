@@ -266,46 +266,66 @@ def kill_old_server(port: int = 8765) -> bool:
         return False
 
 
-def check_version_and_restart_if_needed(host: str, port: int) -> bool:
+def check_version_and_restart_if_needed(host: str, port: int) -> bool | None:
     """Check if server version matches client version, restart if not.
 
     This enables automatic server updates when the client code is updated.
+    If version mismatch is detected, kills old server and starts new one immediately.
 
     Args:
         host: Server host.
         port: Server port.
 
     Returns:
-        True if check passed (server ready or restarted), False on error.
+        True if server is ready to use (existing or newly started).
+        False if server needs to be started by caller.
+        None on error.
     """
     if not is_server_running(host, port):
-        return True
+        return False  # Caller should start the server
 
     server_version = read_server_version()
+
+    needs_restart = False
 
     if server_version is None:
         # Old server without version tracking, kill and restart
         logger.info("Server running without version info, restarting...")
-        if not kill_old_server(port):
-            logger.error("Failed to kill old server")
-            return False
-        # Wait for port to be released
-        time.sleep(1)
-        return True
-
-    if server_version != __version__:
+        needs_restart = True
+    elif server_version != __version__:
         logger.info(
             f"Version mismatch: server={server_version}, client={__version__}. "
             "Restarting server..."
         )
-        if not kill_old_server(port):
-            logger.error("Failed to kill old server for version upgrade")
-            return False
-        # Wait for port to be released
-        time.sleep(1)
-        return True
+        needs_restart = True
+    else:
+        logger.info(f"Server version matches ({__version__})")
+        return True  # Server is ready
 
-    logger.info(f"Server version matches ({__version__})")
+    if needs_restart:
+        if not kill_old_server(port):
+            logger.error("Failed to kill old server")
+            return None
+
+        # Wait for port to be fully released
+        for _ in range(10):
+            time.sleep(0.5)
+            if not is_server_running(host, port):
+                break
+        else:
+            logger.warning("Port still in use after kill, attempting to continue...")
+
+        # Start new server immediately to prevent other instances from starting old version
+        logger.info("Starting new server with current version...")
+        start_background_server(host, port)
+
+        if not wait_for_server(host, port, timeout=15.0):
+            logger.error("Failed to start new server after version upgrade")
+            return None
+
+        logger.info("New server started successfully")
+        return True  # Server is ready
+
     return True
 
 
@@ -565,11 +585,17 @@ def ensure_server_and_run_proxy(host: str, port: int) -> None:
 
     try:
         with lock:
-            # Check version and restart if needed (handles kill + cleanup)
-            if not check_version_and_restart_if_needed(host, port):
-                logger.error("Version check failed, continuing anyway...")
+            # Check version and restart if needed (handles kill + start)
+            result = check_version_and_restart_if_needed(host, port)
 
-            if not is_server_running(host, port):
+            if result is None:
+                logger.error("Version check failed")
+                sys.exit(1)
+            elif result is True:
+                # Server is ready (existing or newly started after version upgrade)
+                logger.info(f"Server ready on {host}:{port}")
+            else:
+                # result is False: no server running, need to start
                 logger.info(f"Server not running on {host}:{port}, starting...")
                 start_background_server(host, port)
 
@@ -578,8 +604,6 @@ def ensure_server_and_run_proxy(host: str, port: int) -> None:
                     sys.exit(1)
 
                 logger.info("Background server is ready")
-            else:
-                logger.info(f"Server already running on {host}:{port}")
 
     except Timeout:
         logger.warning(
