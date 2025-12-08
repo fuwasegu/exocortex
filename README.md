@@ -47,6 +47,15 @@ Exocortex approach (centralized):
 - 🧠 **Memory Dynamics**: Smart recall based on recency and frequency—frequently accessed memories surface higher.
 - 🖥️ **Web Dashboard**: Beautiful cyberpunk-style UI for browsing memories, monitoring health, and visualizing the knowledge graph.
 
+## 📚 Usage Guide
+
+**→ [See the full usage guide](./manuals/usage-guide.md)**
+
+- Tool reference with use cases
+- Practical workflows
+- Prompting tips
+- Tips & Tricks
+
 ## Installation
 
 ```bash
