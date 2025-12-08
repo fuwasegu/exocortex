@@ -159,6 +159,33 @@ def cleanup_server_files() -> None:
             f.unlink(missing_ok=True)
 
 
+def find_pid_on_port(port: int) -> int | None:
+    """Find the PID of a process listening on the given port.
+
+    Args:
+        port: The port to check.
+
+    Returns:
+        PID if found, None otherwise.
+    """
+    try:
+        # Use lsof to find process listening on port
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # May return multiple PIDs, take the first one
+            pid_str = result.stdout.strip().split("\n")[0]
+            return int(pid_str)
+    except Exception as e:
+        logger.debug(f"lsof failed: {e}")
+
+    return None
+
+
 def kill_old_server(port: int = 8765) -> bool:
     """Kill the old server process if running.
 
@@ -172,18 +199,28 @@ def kill_old_server(port: int = 8765) -> bool:
         True if server was killed or wasn't running, False on error.
     """
     pid = read_server_pid()
+    from_pid_file = pid is not None
+
     if pid is None:
-        logger.debug("No PID file found")
-        return True
+        # No PID file - try to find process by port (for old servers without PID tracking)
+        pid = find_pid_on_port(port)
+        if pid is None:
+            logger.debug("No PID file and no process found on port")
+            return True
+        logger.info(f"Found process {pid} on port {port} (no PID file)")
 
     # Safety check: Verify the PID is actually an Exocortex process
     if not is_exocortex_process(pid, port):
-        logger.warning(
-            f"PID {pid} from server.pid is NOT an Exocortex process. "
-            "Cleaning up stale PID file without killing."
-        )
-        cleanup_server_files()
-        return True
+        if from_pid_file:
+            logger.warning(
+                f"PID {pid} from server.pid is NOT an Exocortex process. "
+                "Cleaning up stale PID file without killing."
+            )
+            cleanup_server_files()
+            return True
+        else:
+            logger.warning(f"Process {pid} on port {port} is not Exocortex, skipping kill")
+            return False
 
     # Additional safety: Verify the process is listening on our port
     if not is_pid_listening_on_port(pid, port):
