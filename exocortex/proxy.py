@@ -219,7 +219,9 @@ def kill_old_server(port: int = 8765) -> bool:
             cleanup_server_files()
             return True
         else:
-            logger.warning(f"Process {pid} on port {port} is not Exocortex, skipping kill")
+            logger.warning(
+                f"Process {pid} on port {port} is not Exocortex, skipping kill"
+            )
             return False
 
     # Additional safety: Verify the process is listening on our port
