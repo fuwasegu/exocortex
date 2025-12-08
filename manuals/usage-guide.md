@@ -52,7 +52,7 @@ Search for relevant past knowledge.
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `content` | Memory content (Markdown supported) | Design decision details |
-| `context_name` | Project/situation name | `"my-project"`, `"exocortex"` |
+| `context_name` | Project/situation name | `"my-webapp"`, `"api-server"` |
 | `tags` | Related keywords | `["laravel", "ddd", "architecture"]` |
 | `memory_type` | Type of memory | `insight`, `success`, `failure`, `decision`, `note` |
 
@@ -82,7 +82,7 @@ It worked somehow
 |-----------|-------------|---------|
 | `query` | Search query (natural language) | `"authorization patterns"` |
 | `limit` | Maximum results | `5` (default) |
-| `context_filter` | Filter by project | `"my-project"` |
+| `context_filter` | Filter by project | `"my-webapp"` |
 | `tag_filter` | Filter by tags | `["laravel", "ddd"]` |
 | `type_filter` | Filter by type | `"decision"` |
 
