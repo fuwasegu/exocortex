@@ -371,4 +371,3 @@ class TestHybridScoringRepository:
         found_ids = [m.id for m in recalled]
         found_count = sum(1 for cid in created_ids if cid in found_ids)
         assert found_count >= 3  # At least 3 of 5 should be found
-

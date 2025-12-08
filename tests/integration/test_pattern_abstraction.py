@@ -463,4 +463,3 @@ class TestMemoryClusteringLogic:
         # Both should complete without error
         assert high_threshold_result is not None
         assert low_threshold_result is not None
-

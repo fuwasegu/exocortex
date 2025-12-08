@@ -611,7 +611,9 @@ class MemoryRepository:
 
             # S_freq: Logarithmic scale for access count (normalized)
             access_count = memory.access_count if memory.access_count else 1
-            s_freq = math.log(1 + access_count) / max_log_access if max_log_access > 0 else 0
+            s_freq = (
+                math.log(1 + access_count) / max_log_access if max_log_access > 0 else 0
+            )
 
             # Combined hybrid score
             hybrid_score = (s_vec * w_vec) + (s_recency * w_recency) + (s_freq * w_freq)

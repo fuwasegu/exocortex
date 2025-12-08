@@ -845,7 +845,11 @@ def sleep(enable_logging: bool = False) -> dict[str, Any]:
         Status indicating whether the worker was spawned.
     """
     from .config import get_config
-    from .worker.process import get_default_log_path, is_dreamer_running, spawn_detached_dreamer
+    from .worker.process import (
+        get_default_log_path,
+        is_dreamer_running,
+        spawn_detached_dreamer,
+    )
 
     config = get_config()
     lock_path = config.data_dir / "dream.lock"

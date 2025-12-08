@@ -69,4 +69,3 @@ class TestExceptions:
         assert issubclass(DuplicateLinkError, ExocortexError)
         assert issubclass(SelfLinkError, ExocortexError)
         assert issubclass(DatabaseError, ExocortexError)
-

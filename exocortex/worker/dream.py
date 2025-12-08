@@ -170,8 +170,7 @@ class DreamWorker:
 
         except Timeout:
             logger.info(
-                "Could not acquire lock (database in use). "
-                "Will retry next time."
+                "Could not acquire lock (database in use). Will retry next time."
             )
         except Exception as e:
             logger.exception(f"Dream worker error: {e}")
@@ -278,7 +277,9 @@ class DreamWorker:
                     except Exception as e:
                         logger.debug(f"Could not link duplicates: {e}")
 
-            logger.info(f"Deduplication complete: {duplicates_found} potential duplicates flagged")
+            logger.info(
+                f"Deduplication complete: {duplicates_found} potential duplicates flagged"
+            )
 
         except Exception as e:
             logger.warning(f"Deduplication task error: {e}")
@@ -356,6 +357,7 @@ def main() -> None:
     """Entry point for the dream worker process."""
     # Set log level from environment
     import os
+
     log_level = os.environ.get("EXOCORTEX_LOG_LEVEL", "INFO").upper()
     logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
 
@@ -365,4 +367,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
