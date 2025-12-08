@@ -45,6 +45,7 @@ Exocortex approach (centralized):
 - 🔗 **Memory Links**: Connect related memories to build a traversable knowledge network.
 - ⚡ **Lightweight & Fast**: Uses embedded KùzuDB and lightweight fastembed models.
 - 🧠 **Memory Dynamics**: Smart recall based on recency and frequency—frequently accessed memories surface higher.
+- 🖥️ **Web Dashboard**: Beautiful cyberpunk-style UI for browsing memories, monitoring health, and visualizing the knowledge graph.
 
 ## Installation
 
@@ -147,11 +148,13 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 {
   "mcpServers": {
     "exocortex": {
-      "url": "http://127.0.0.1:8765/sse"
+      "url": "http://127.0.0.1:8765/mcp/sse"
     }
   }
 }
 ```
+
+> **Bonus:** With this setup, you can also access the web dashboard at `http://127.0.0.1:8765/`
 
 > **Tip:** To auto-start the server on system boot, use `launchd` on macOS or `systemd` on Linux.
 
@@ -450,6 +453,84 @@ Result: "Created 2 patterns from 8 memories"
 - 🎯 **Generalization**: Discover rules that apply across specific cases
 - 🔍 **Meta-learning**: Find what works (and what doesn't) across projects
 - 📈 **Confidence Building**: Patterns get stronger as more instances are linked
+
+## Web Dashboard
+
+Exocortex includes a beautiful web dashboard for visualizing and managing your knowledge base.
+
+### Accessing the Dashboard
+
+#### 🚀 If You're Using Proxy Mode (Recommended)
+
+**No terminal commands needed!** When using proxy mode (`--mode proxy --ensure-server`) with Cursor, the SSE server is automatically running in the background.
+
+**Just open this in your browser:**
+
+```
+http://127.0.0.1:8765/
+```
+
+```
+Cursor starts
+    ↓
+Proxy mode → SSE server auto-starts (port 8765)
+    ↓
+├─ MCP: http://127.0.0.1:8765/mcp/sse ← Used by Cursor
+└─ Dashboard: http://127.0.0.1:8765/ ← Just open in browser!
+```
+
+#### Starting the Server Manually
+
+If you want to view the dashboard without using Cursor:
+
+```bash
+# Start SSE server (includes dashboard)
+uv run exocortex --transport sse --port 8765
+```
+
+**URLs:**
+- **Dashboard**: `http://127.0.0.1:8765/`
+- **MCP SSE**: `http://127.0.0.1:8765/mcp/sse`
+
+### Dashboard Features
+
+| Tab | Description |
+|-----|-------------|
+| **Overview** | Statistics, contexts, tags, and knowledge base health score |
+| **Memories** | Browse, filter, and search memories with pagination |
+| **Dream Log** | Real-time streaming log of background consolidation processes |
+| **Graph** | Visual knowledge graph showing memory connections |
+
+### Screenshots
+
+**Overview Tab**
+- Total memories count by type (Insights, Successes, Failures, Decisions, Notes)
+- Context and tag clouds for quick navigation
+- Health score with improvement suggestions
+
+**Memories Tab**
+- Filter by type (Insight/Success/Failure/Decision/Note)
+- Filter by context (project)
+- Click any memory to see full details and links
+
+**Graph Tab**
+- Interactive node visualization
+- Color-coded by memory type:
+  - 🔵 Cyan: Insights
+  - 🟠 Orange: Decisions
+  - 🟢 Green: Successes
+  - 🔴 Red: Failures
+- Lines show `RELATED_TO` connections between memories
+
+### Standalone Dashboard Mode
+
+You can also run the dashboard separately on a different port:
+
+```bash
+uv run exocortex --mode dashboard --dashboard-port 8766
+```
+
+> **Note:** In standalone mode, the dashboard connects to the same database but doesn't include the MCP server.
 
 ## Documentation
 

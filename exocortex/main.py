@@ -141,10 +141,7 @@ def _run_integrated_server(
     )
 
     # Get MCP ASGI app based on transport type
-    if transport == "sse":
-        mcp_app = mcp.sse_app()
-    else:
-        mcp_app = mcp.streamable_http_app()
+    mcp_app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
 
     # Dashboard routes
     dashboard_routes = [
