@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
+import signal
 import socket
 import subprocess
 import sys
@@ -11,7 +14,139 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
 logger = logging.getLogger(__name__)
+
+
+def get_server_version_file() -> Path:
+    """Get the path to the server version file."""
+    from .config import get_config
+
+    config = get_config()
+    return config.data_dir / "server_version"
+
+
+def get_server_pid_file() -> Path:
+    """Get the path to the server PID file."""
+    from .config import get_config
+
+    config = get_config()
+    return config.data_dir / "server.pid"
+
+
+def read_server_version() -> str | None:
+    """Read the version of the currently running server."""
+    version_file = get_server_version_file()
+    if version_file.exists():
+        try:
+            return version_file.read_text().strip()
+        except Exception:
+            return None
+    return None
+
+
+def read_server_pid() -> int | None:
+    """Read the PID of the currently running server."""
+    pid_file = get_server_pid_file()
+    if pid_file.exists():
+        try:
+            return int(pid_file.read_text().strip())
+        except Exception:
+            return None
+    return None
+
+
+def write_server_info(pid: int) -> None:
+    """Write server version and PID files."""
+    version_file = get_server_version_file()
+    pid_file = get_server_pid_file()
+
+    # Ensure parent directory exists
+    version_file.parent.mkdir(parents=True, exist_ok=True)
+
+    version_file.write_text(__version__)
+    pid_file.write_text(str(pid))
+
+
+def cleanup_server_files() -> None:
+    """Remove server version and PID files."""
+    for f in [get_server_version_file(), get_server_pid_file()]:
+        with contextlib.suppress(Exception):
+            f.unlink(missing_ok=True)
+
+
+def kill_old_server() -> bool:
+    """Kill the old server process if running.
+
+    Returns:
+        True if server was killed or wasn't running, False on error.
+    """
+    pid = read_server_pid()
+    if pid is None:
+        return True
+
+    try:
+        # Check if process exists
+        os.kill(pid, 0)
+        # Process exists, kill it
+        logger.info(f"Killing old server (PID: {pid}) for version upgrade...")
+        os.kill(pid, signal.SIGTERM)
+
+        # Wait for process to terminate
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                # Process terminated
+                cleanup_server_files()
+                logger.info("Old server terminated successfully")
+                return True
+
+        # Force kill if still running
+        logger.warning("Server didn't terminate gracefully, force killing...")
+        os.kill(pid, signal.SIGKILL)
+        cleanup_server_files()
+        return True
+
+    except OSError:
+        # Process doesn't exist
+        cleanup_server_files()
+        return True
+    except Exception as e:
+        logger.error(f"Error killing old server: {e}")
+        return False
+
+
+def check_version_and_restart_if_needed(host: str, port: int) -> None:
+    """Check if server version matches client version, restart if not.
+
+    This enables automatic server updates when the client code is updated.
+    """
+    if not is_server_running(host, port):
+        return
+
+    server_version = read_server_version()
+
+    if server_version is None:
+        # Old server without version tracking, kill and restart
+        logger.info("Server running without version info, restarting...")
+        kill_old_server()
+        # Wait for port to be released
+        time.sleep(1)
+        return
+
+    if server_version != __version__:
+        logger.info(
+            f"Version mismatch: server={server_version}, client={__version__}. "
+            "Restarting server..."
+        )
+        kill_old_server()
+        # Wait for port to be released
+        time.sleep(1)
+    else:
+        logger.info(f"Server version matches ({__version__})")
 
 
 def is_server_running(host: str, port: int) -> bool:
@@ -38,6 +173,7 @@ def wait_for_server(host: str, port: int, timeout: float = 10.0) -> bool:
 def start_background_server(host: str, port: int) -> subprocess.Popen | None:
     """Start the SSE server in the background."""
     logger.info(f"Starting background SSE server on {host}:{port}...")
+    logger.info(f"Server version: {__version__}")
 
     # Get the path to this module's directory
     module_dir = Path(__file__).parent.parent
@@ -65,6 +201,10 @@ def start_background_server(host: str, port: int) -> subprocess.Popen | None:
             start_new_session=True,  # Detach from parent process
         )
         logger.info(f"Background server started with PID {process.pid}")
+
+        # Write version and PID for future version checks
+        write_server_info(process.pid)
+
         return process
     except Exception as e:
         logger.error(f"Failed to start background server: {e}")
@@ -189,7 +329,7 @@ class StdioToSSEProxy:
                 },
                 "serverInfo": {
                     "name": "exocortex",
-                    "version": "0.1.0",
+                    "version": __version__,
                 },
             }
         elif method == "initialized":
@@ -245,7 +385,18 @@ def run_proxy(host: str, port: int) -> None:
 
 
 def ensure_server_and_run_proxy(host: str, port: int) -> None:
-    """Ensure the SSE server is running and then run the proxy."""
+    """Ensure the SSE server is running with correct version and then run the proxy.
+
+    This function:
+    1. Checks if server is running
+    2. If running, checks if version matches
+    3. If version mismatch, kills old server and starts new one
+    4. If not running, starts new server
+    5. Runs the proxy
+    """
+    # Check version and restart if needed (handles kill + cleanup)
+    check_version_and_restart_if_needed(host, port)
+
     if not is_server_running(host, port):
         logger.info(f"Server not running on {host}:{port}, starting...")
         start_background_server(host, port)
