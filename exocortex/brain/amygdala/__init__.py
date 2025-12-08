@@ -11,8 +11,7 @@ Based on the Somatic Marker Hypothesis:
 "Painful memories should be prioritized in decision-making"
 """
 
-from exocortex.brain.amygdala.sentiment import SentimentAnalyzer
 from exocortex.brain.amygdala.frustration import FrustrationIndexer
+from exocortex.brain.amygdala.sentiment import SentimentAnalyzer
 
 __all__ = ["SentimentAnalyzer", "FrustrationIndexer"]
-

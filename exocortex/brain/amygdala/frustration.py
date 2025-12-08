@@ -157,4 +157,3 @@ class FrustrationIndexer:
             return "😓"  # Low pain
         else:
             return ""  # No pain indicator
-

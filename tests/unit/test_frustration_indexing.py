@@ -6,8 +6,8 @@ and frustration scoring for memories.
 
 import pytest
 
+from exocortex.brain.amygdala.frustration import FrustrationIndex, FrustrationIndexer
 from exocortex.brain.amygdala.sentiment import SentimentAnalyzer, SentimentResult
-from exocortex.brain.amygdala.frustration import FrustrationIndexer, FrustrationIndex
 
 
 class TestSentimentAnalyzer:
@@ -28,7 +28,10 @@ class TestSentimentAnalyzer:
         content = "This bug was a nightmare to debug! Absolutely impossible!"
         result = analyzer.analyze(content)
         assert result.frustration_score >= 0.7
-        assert "keyword:nightmare" in result.indicators or "keyword:impossible" in result.indicators
+        assert (
+            "keyword:nightmare" in result.indicators
+            or "keyword:impossible" in result.indicators
+        )
 
     def test_medium_frustration_keywords(self, analyzer: SentimentAnalyzer) -> None:
         """Test medium frustration keywords are detected."""
@@ -134,11 +137,11 @@ class TestFrustrationIndexer:
         """Test applying frustration boost to search score."""
         base_score = 0.5
         frustration_score = 0.8
-        
+
         boosted = indexer.apply_frustration_boost(
             base_score, frustration_score, w_frustration=0.15
         )
-        
+
         expected = base_score + (frustration_score * 0.15)
         assert boosted == pytest.approx(expected)
 
@@ -269,4 +272,3 @@ class TestTimePatterns:
         content = "Spent 2 hours initially, then it took 1 day to fully fix."
         result = analyzer.analyze(content)
         assert result.estimated_hours == 8.0  # 1 day = 8 hours > 2 hours
-

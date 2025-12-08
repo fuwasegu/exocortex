@@ -448,7 +448,9 @@ def recall_memories(
                 "context": m.context,
                 "tags": m.tags,
                 "similarity": round(m.similarity, 3) if m.similarity else None,
-                "frustration_score": round(m.frustration_score, 3) if m.frustration_score else 0.0,
+                "frustration_score": round(m.frustration_score, 3)
+                if m.frustration_score
+                else 0.0,
                 "pain_indicator": indexer.get_pain_emoji(m.frustration_score or 0.0),
                 "time_cost_hours": m.time_cost_hours,
                 "created_at": m.created_at.isoformat(),

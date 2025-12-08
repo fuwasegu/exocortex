@@ -637,7 +637,9 @@ class MemoryRepository:
 
             # S_frustration: Frustration score (Somatic Marker Hypothesis)
             # Painful memories should be prioritized in decision-making
-            s_frustration = memory.frustration_score if memory.frustration_score else 0.0
+            s_frustration = (
+                memory.frustration_score if memory.frustration_score else 0.0
+            )
 
             # Combined hybrid score with frustration boost
             hybrid_score = (

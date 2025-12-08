@@ -13,4 +13,3 @@ cognitive functions modeled after the human brain:
 from exocortex.brain import amygdala
 
 __all__ = ["amygdala"]
-

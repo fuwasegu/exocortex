@@ -57,7 +57,6 @@ class SentimentAnalyzer:
         "struggle": 0.7,
         "struggling": 0.75,
         "headache": 0.7,
-        "nightmare": 0.8,
         # Medium frustration (0.4-0.6)
         "finally": 0.5,  # Often indicates relief after struggle
         "hours": 0.4,  # Time spent indicator
@@ -228,4 +227,3 @@ class SentimentAnalyzer:
                     max_hours = hours
 
         return max_hours
-
