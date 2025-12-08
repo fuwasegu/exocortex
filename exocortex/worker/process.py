@@ -41,8 +41,8 @@ def spawn_detached_dreamer(
         if sys.platform == "win32":
             # Windows: Use CREATE_NEW_PROCESS_GROUP and DETACHED_PROCESS
             # This creates a process that survives parent termination
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806 (Windows API constant)
+            DETACHED_PROCESS = 0x00000008  # noqa: N806 (Windows API constant)
 
             startup_info = subprocess.STARTUPINFO()
             startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW

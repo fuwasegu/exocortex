@@ -17,8 +17,6 @@ import logging
 import signal
 import sys
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 
 from filelock import FileLock, Timeout
 
@@ -223,7 +221,7 @@ class DreamWorker:
             processed_pairs: set[tuple[str, str]] = set()
             duplicates_found = 0
 
-            for i, memory in enumerate(memories):
+            for _i, memory in enumerate(memories):
                 if not self._running:
                     break
 
@@ -299,7 +297,7 @@ class DreamWorker:
             logger.info(f"Found {len(orphan_tuples)} orphan memories")
 
             rescued = 0
-            for orphan_id, orphan_summary in orphan_tuples:
+            for orphan_id, _orphan_summary in orphan_tuples:
                 if not self._running:
                     break
 

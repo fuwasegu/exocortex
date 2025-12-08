@@ -18,6 +18,7 @@ from ..domain.models import (
     MemoryStats,
     MemoryType,
     MemoryWithContext,
+    Pattern,
     RelationType,
 )
 from .database import DatabaseConnection, SmartDatabaseManager

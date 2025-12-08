@@ -265,12 +265,12 @@ class TestPatternClusteringLogic:
         default_threshold = 0.7
 
         # Memories with similarity >= 0.7 should cluster
-        assert 0.75 >= default_threshold
-        assert 0.8 >= default_threshold
+        assert default_threshold <= 0.75
+        assert default_threshold <= 0.8
 
         # Memories with similarity < 0.7 should not cluster
-        assert 0.65 < default_threshold
-        assert 0.5 < default_threshold
+        assert default_threshold > 0.65
+        assert default_threshold > 0.5
 
     def test_minimum_cluster_size(self):
         """Test minimum cluster size requirement."""
@@ -289,11 +289,11 @@ class TestPatternClusteringLogic:
         existing_pattern_threshold = 0.8
 
         # High similarity should link to existing
-        assert 0.85 >= existing_pattern_threshold
-        assert 0.9 >= existing_pattern_threshold
+        assert existing_pattern_threshold <= 0.85
+        assert existing_pattern_threshold <= 0.9
 
         # Lower similarity should create new pattern
-        assert 0.75 < existing_pattern_threshold
+        assert existing_pattern_threshold > 0.75
 
 
 class TestPatternSynthesis:
@@ -362,7 +362,7 @@ class TestPatternSynthesis:
         ]
 
         # Simulate content generation
-        content = f"""**Pattern extracted from 5 memories**
+        content = """**Pattern extracted from 5 memories**
 
 - Dominant type: success
 - Common tags: database, performance

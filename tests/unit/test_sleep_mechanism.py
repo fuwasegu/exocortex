@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from exocortex.worker.process import (
     get_default_log_path,
     is_dreamer_running,
