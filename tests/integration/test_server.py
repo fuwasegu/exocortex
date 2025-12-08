@@ -277,3 +277,4 @@ class TestServerTools:
         # (depends on embedding similarity threshold)
         assert "suggested_links" in result
         assert "insights" in result
+

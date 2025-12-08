@@ -260,3 +260,4 @@ class TestMemoryServiceLink:
 
         links = service.get_memory_links(result2.memory_id)
         assert len(links) == 0
+
