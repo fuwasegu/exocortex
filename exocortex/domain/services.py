@@ -596,13 +596,17 @@ class MemoryService:
         # Get candidate memories
         if tag_filter:
             candidates = self._repo.get_memories_by_tag(tag_filter, limit=100)
-            logger.info(f"Consolidating patterns for tag '{tag_filter}': {len(candidates)} memories")
+            logger.info(
+                f"Consolidating patterns for tag '{tag_filter}': {len(candidates)} memories"
+            )
         else:
             # Focus on frequently accessed memories
             candidates = self._repo.get_frequently_accessed_memories(
                 min_access_count=3, limit=100
             )
-            logger.info(f"Consolidating patterns for frequently accessed memories: {len(candidates)}")
+            logger.info(
+                f"Consolidating patterns for frequently accessed memories: {len(candidates)}"
+            )
 
         if len(candidates) < min_cluster_size:
             logger.info("Not enough memories to extract patterns")
@@ -635,7 +639,9 @@ class MemoryService:
                     )
                     result["memories_linked"] += 1
                 result["patterns_found"] += 1
-                logger.info(f"Linked {len(cluster)} memories to existing pattern {pattern_id[:8]}...")
+                logger.info(
+                    f"Linked {len(cluster)} memories to existing pattern {pattern_id[:8]}..."
+                )
             else:
                 # Create new pattern from cluster
                 pattern_content = self._synthesize_pattern_content(cluster)
@@ -655,12 +661,16 @@ class MemoryService:
                         result["memories_linked"] += 1
 
                     result["patterns_created"] += 1
-                    result["details"].append({
-                        "pattern_id": pattern_id,
-                        "summary": summary,
-                        "instance_count": len(cluster),
-                    })
-                    logger.info(f"Created new pattern {pattern_id[:8]}... from {len(cluster)} memories")
+                    result["details"].append(
+                        {
+                            "pattern_id": pattern_id,
+                            "summary": summary,
+                            "instance_count": len(cluster),
+                        }
+                    )
+                    logger.info(
+                        f"Created new pattern {pattern_id[:8]}... from {len(cluster)} memories"
+                    )
 
         return result
 
@@ -725,7 +735,8 @@ class MemoryService:
                 tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
         common_tags = [
-            tag for tag, count in tag_counts.items()
+            tag
+            for tag, count in tag_counts.items()
             if count >= len(cluster) * 0.5  # At least 50% of memories have this tag
         ]
 
@@ -735,7 +746,11 @@ class MemoryService:
             mt = memory.memory_type.value
             type_counts[mt] = type_counts.get(mt, 0) + 1
 
-        dominant_type = max(type_counts.items(), key=lambda x: x[1])[0] if type_counts else "insight"
+        dominant_type = (
+            max(type_counts.items(), key=lambda x: x[1])[0]
+            if type_counts
+            else "insight"
+        )
 
         # Generate pattern content
         summaries = [m.summary for m in cluster[:5]]  # Use first 5 summaries

@@ -48,4 +48,3 @@ class DatabaseError(ExocortexError):
     """Raised when a database operation fails."""
 
     pass
-

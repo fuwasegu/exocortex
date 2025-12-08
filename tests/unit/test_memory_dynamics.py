@@ -354,4 +354,3 @@ class TestScoringScenarios:
 
         # Low match old should be last
         assert sorted_scores[-1][0] == "low_match_old"
-

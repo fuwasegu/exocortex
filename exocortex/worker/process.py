@@ -130,6 +130,6 @@ def is_dreamer_running(lock_path: Path) -> bool:
 def get_default_log_path() -> Path:
     """Get the default log path for the dream worker."""
     from ..config import get_config
+
     config = get_config()
     return config.data_dir / "logs" / "dream.log"
-

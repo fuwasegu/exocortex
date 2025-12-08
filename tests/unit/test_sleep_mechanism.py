@@ -315,4 +315,3 @@ class TestDreamWorkerSignalHandling:
             worker._handle_signal(15, None)  # SIGTERM
 
             assert worker._running is False
-

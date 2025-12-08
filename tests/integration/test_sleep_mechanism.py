@@ -339,4 +339,3 @@ class TestConsolidationEnd2End:
         similar_ids = [s[0] for s in similar]
         found_cluster = sum(1 for mid in memories[1:] if mid in similar_ids)
         assert found_cluster >= 2, "Should find at least 2 other cluster members"
-

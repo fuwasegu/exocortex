@@ -374,4 +374,3 @@ class TestPatternSynthesis:
 
         for part in expected_parts:
             assert part in content
-
