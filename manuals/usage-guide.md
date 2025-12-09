@@ -182,6 +182,16 @@ Scan your knowledge base for contradictions, outdated info, and generate questio
 - "Question my assumptions about the database design"
 - "Scan for inconsistencies in my project"
 
+**🤖 Optional: BERT-based Sentiment Analysis**
+
+For higher accuracy, install `exocortex[sentiment]` to enable BERT model:
+
+```bash
+pip install exocortex[sentiment]
+```
+
+Without it, keyword-based detection is used (works well for most cases).
+
 ---
 
 ### 🌐 Explore Related (`exo_explore_related`)

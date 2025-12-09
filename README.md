@@ -379,6 +379,34 @@ Result: Report of potential issues and questions to investigate
 - 🧹 **Quality maintenance**: "What needs to be cleaned up?"
 - 💡 **Discovery**: "What questions should I be asking about my knowledge?"
 
+### Optional: Enhanced Sentiment Analysis
+
+For higher accuracy contradiction detection in `exo_curiosity_scan`, you can enable BERT-based sentiment analysis:
+
+```bash
+# Local installation
+pip install exocortex[sentiment]
+# or
+uv sync --extra sentiment
+```
+
+```json
+// mcp.json with sentiment support
+{
+  "mcpServers": {
+    "exocortex": {
+      "command": "uvx",
+      "args": [
+        "--from", "exocortex[sentiment] @ git+https://github.com/fuwasegu/exocortex",
+        "exocortex", "--mode", "proxy", "--ensure-server"
+      ]
+    }
+  }
+}
+```
+
+> **Note:** Adds ~2.5GB of dependencies (PyTorch + Transformers). The default keyword-based detection works well for most cases and supports both English and Japanese.
+
 ## Environment Variables
 
 | Variable | Default | Description |

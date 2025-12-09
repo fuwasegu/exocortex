@@ -6,6 +6,7 @@ Tests for:
 - Question generation
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -126,6 +127,27 @@ class TestCuriosityEngineContradictionDetection:
         assert contradiction is not None
         assert "shared tags" in contradiction.reason.lower()
 
+    def test_detects_japanese_keyword_contradiction(self, engine):
+        """Japanese contradictory keywords should be detected."""
+        mem_a = MagicMock()
+        mem_a.id = "mem-a"
+        mem_a.summary = "成功したアプローチ"
+        mem_a.content = "この方法で解決できた。推奨する。"
+        mem_a.memory_type = "insight"
+        mem_a.tags = ["database"]
+
+        mem_b = MagicMock()
+        mem_b.id = "mem-b"
+        mem_b.summary = "失敗したアプローチ"
+        mem_b.content = "この方法はダメだった。バグが発生する。"
+        mem_b.memory_type = "insight"
+        mem_b.tags = ["database"]
+
+        contradiction = engine._check_contradiction(mem_a, mem_b)
+
+        assert contradiction is not None
+        assert "contradictory sentiment" in contradiction.reason.lower()
+
 
 class TestCuriosityEngineOutdatedDetection:
     """Tests for outdated knowledge detection."""
@@ -134,33 +156,43 @@ class TestCuriosityEngineOutdatedDetection:
     def engine(self):
         """Create engine with mock repository."""
         mock_repo = MagicMock()
-        return CuriosityEngine(repository=mock_repo)
+        return CuriosityEngine(repository=mock_repo, stale_days=90)
 
-    def test_detects_superseded_memories(self, engine):
-        """Memories with supersedes links should be flagged as outdated."""
-        # Setup mock
+    def test_detects_stale_unsuperseded_memories(self, engine):
+        """Old memories of type insight/decision that haven't been superseded should be flagged."""
+        # Setup mock - a stale insight memory
         old_memory = MagicMock()
         old_memory.id = "old-mem"
-        old_memory.summary = "Old approach"
-
-        new_memory = MagicMock()
-        new_memory.id = "new-mem"
-        new_memory.summary = "New approach"
-
-        link = MagicMock()
-        link.relation_type = "supersedes"
-        link.target_id = "old-mem"
+        old_memory.summary = "Old architecture decision"
+        old_memory.memory_type = "decision"
+        old_memory.created_at = datetime.now(timezone.utc) - timedelta(days=120)
+        old_memory.updated_at = datetime.now(timezone.utc) - timedelta(days=120)
 
         # list_memories returns 3 values: (memories, total_count, has_more)
-        engine._repo.list_memories.return_value = ([new_memory], 1, False)
-        engine._repo.get_links.return_value = [link]
-        engine._repo.get_by_id.return_value = old_memory
+        engine._repo.list_memories.return_value = ([old_memory], 1, False)
+        # No supersedes links
+        engine._repo.get_links.return_value = []
 
         outdated = engine._find_outdated_knowledge(None, 10)
 
         assert len(outdated) == 1
         assert outdated[0].memory_id == "old-mem"
-        assert outdated[0].superseded_by_id == "new-mem"
+        assert outdated[0].days_since_update >= 90
+
+    def test_ignores_recent_memories(self, engine):
+        """Recent memories should not be flagged as outdated."""
+        recent_memory = MagicMock()
+        recent_memory.id = "recent-mem"
+        recent_memory.summary = "Recent decision"
+        recent_memory.memory_type = "decision"
+        recent_memory.created_at = datetime.now(timezone.utc) - timedelta(days=10)
+        recent_memory.updated_at = datetime.now(timezone.utc) - timedelta(days=10)
+
+        engine._repo.list_memories.return_value = ([recent_memory], 1, False)
+
+        outdated = engine._find_outdated_knowledge(None, 10)
+
+        assert len(outdated) == 0
 
 
 class TestCuriosityEngineQuestionGeneration:
@@ -191,7 +223,8 @@ class TestCuriosityEngineQuestionGeneration:
         questions = engine._generate_questions(report)
 
         assert len(questions) >= 1
-        assert "contradict" in questions[0].lower()
+        # Check for Japanese message (矛盾 = contradiction)
+        assert "矛盾" in questions[0]
 
     def test_generates_outdated_question(self, engine):
         """Should generate question when outdated knowledge found."""
@@ -200,9 +233,10 @@ class TestCuriosityEngineQuestionGeneration:
                 OutdatedKnowledge(
                     memory_id="old",
                     summary="Old stuff",
-                    superseded_by_id="new",
-                    superseded_by_summary="New stuff",
+                    superseded_by_id=None,
+                    superseded_by_summary=None,
                     reason="test",
+                    days_since_update=100,
                 )
             ]
         )
@@ -210,7 +244,8 @@ class TestCuriosityEngineQuestionGeneration:
         questions = engine._generate_questions(report)
 
         assert len(questions) >= 1
-        assert "superseded" in questions[0].lower() or "old" in questions[0].lower()
+        # Check for Japanese message (古くなった = outdated)
+        assert "古くなった" in questions[0]
 
     def test_generates_positive_message_when_clean(self, engine):
         """Should generate positive message when no issues found."""
@@ -219,7 +254,8 @@ class TestCuriosityEngineQuestionGeneration:
         questions = engine._generate_questions(report)
 
         assert len(questions) >= 1
-        assert "consistent" in questions[0].lower() or "looks" in questions[0].lower()
+        # Check for Japanese message (一貫 = consistent)
+        assert "一貫" in questions[0]
 
 
 class TestCuriosityReportSerialization:

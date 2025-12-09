@@ -379,6 +379,34 @@ AI: exo_curiosity_scan(context_filter="my-project")
 - 🧹 **品質メンテナンス**: 「何をクリーンアップすべき？」
 - 💡 **発見**: 「知識について何を問うべき？」
 
+### Optional: 高精度センチメント分析
+
+`exo_curiosity_scan` の矛盾検出精度を向上させるため、BERTベースのセンチメント分析を有効化できます：
+
+```bash
+# ローカルインストール
+pip install exocortex[sentiment]
+# または
+uv sync --extra sentiment
+```
+
+```json
+// mcp.json でセンチメント分析を有効化
+{
+  "mcpServers": {
+    "exocortex": {
+      "command": "uvx",
+      "args": [
+        "--from", "exocortex[sentiment] @ git+https://github.com/fuwasegu/exocortex",
+        "exocortex", "--mode", "proxy", "--ensure-server"
+      ]
+    }
+  }
+}
+```
+
+> **Note:** 約2.5GBの依存関係（PyTorch + Transformers）が追加されます。デフォルトのキーワードベース判定でも十分な精度があり、日本語・英語の両方に対応しています。
+
 ## 環境変数
 
 | 変数名 | デフォルト値 | 説明 |

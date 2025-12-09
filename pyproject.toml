@@ -21,6 +21,10 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
 ]
+sentiment = [
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
+]
 
 [project.scripts]
 exocortex = "exocortex.main:main"

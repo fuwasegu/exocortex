@@ -15,6 +15,7 @@ from .curiosity import CuriosityEngine, CuriosityReport
 from .health import KnowledgeHealthAnalyzer
 from .memory import MemoryService
 from .pattern import PatternConsolidator
+from .sentiment import Sentiment, SentimentAnalyzer, SentimentResult
 
 __all__ = [
     "MemoryService",
@@ -23,4 +24,7 @@ __all__ = [
     "PatternConsolidator",
     "CuriosityEngine",
     "CuriosityReport",
+    "SentimentAnalyzer",
+    "Sentiment",
+    "SentimentResult",
 ]

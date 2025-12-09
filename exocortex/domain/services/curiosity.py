@@ -6,13 +6,21 @@ This module implements the "Curiosity Engine" that actively looks for:
 - Knowledge gaps that could be filled
 
 Inspired by the human ability to notice inconsistencies and ask questions.
+
+Sentiment Analysis:
+    When available (pip install exocortex[sentiment]), uses a local BERT model
+    for more accurate positive/negative detection. Falls back to keyword-based
+    detection when the model is not installed.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
+
+from .sentiment import SentimentAnalyzer, get_sentiment_analyzer
 
 if TYPE_CHECKING:
     from exocortex.infra.repositories import MemoryRepository
@@ -42,6 +50,7 @@ class OutdatedKnowledge:
     superseded_by_id: str | None
     superseded_by_summary: str | None
     reason: str
+    days_since_update: int | None = None
 
 
 @dataclass
@@ -85,6 +94,7 @@ class CuriosityReport:
                     "superseded_by_id": o.superseded_by_id,
                     "superseded_by_summary": o.superseded_by_summary,
                     "reason": o.reason,
+                    "days_since_update": o.days_since_update,
                 }
                 for o in self.outdated_knowledge
             ],
@@ -101,9 +111,10 @@ class CuriosityReport:
         }
 
 
-# Keywords that indicate contradictory statements
+# Keywords that indicate contradictory statements (English + Japanese)
 CONTRADICTION_KEYWORDS = {
     "positive": [
+        # English
         "works",
         "success",
         "solved",
@@ -113,8 +124,26 @@ CONTRADICTION_KEYWORDS = {
         "always",
         "best",
         "recommended",
+        "good",
+        "great",
+        "perfect",
+        # Japanese
+        "成功",
+        "解決",
+        "修正",
+        "正しい",
+        "推奨",
+        "良い",
+        "動く",
+        "機能する",
+        "完了",
+        "うまくいった",
+        "できた",
+        "正解",
+        "ベスト",
     ],
     "negative": [
+        # English
         "doesn't work",
         "failed",
         "broken",
@@ -124,6 +153,24 @@ CONTRADICTION_KEYWORDS = {
         "worst",
         "don't",
         "incorrect",
+        "bad",
+        "error",
+        "bug",
+        # Japanese
+        "失敗",
+        "バグ",
+        "間違い",
+        "悪い",
+        "動かない",
+        "エラー",
+        "避ける",
+        "非推奨",
+        "未解決",
+        "ダメ",
+        "できない",
+        "不正解",
+        "ハマった",
+        "問題",
     ],
 }
 
@@ -142,6 +189,9 @@ class CuriosityEngine:
         repository: MemoryRepository,
         contradiction_threshold: float = 0.65,
         min_confidence: float = 0.5,
+        stale_days: int = 90,
+        sentiment_analyzer: SentimentAnalyzer | None = None,
+        use_sentiment_model: bool = True,
     ) -> None:
         """Initialize the Curiosity Engine.
 
@@ -149,10 +199,23 @@ class CuriosityEngine:
             repository: Memory repository for data access.
             contradiction_threshold: Minimum similarity for contradiction check.
             min_confidence: Minimum confidence to report a finding.
+            stale_days: Days after which a memory is considered potentially stale.
+            sentiment_analyzer: Optional custom sentiment analyzer instance.
+            use_sentiment_model: Whether to use BERT model for sentiment (if available).
         """
         self._repo = repository
         self._contradiction_threshold = contradiction_threshold
         self._min_confidence = min_confidence
+        self._stale_days = stale_days
+        self._use_sentiment_model = use_sentiment_model
+
+        # Initialize sentiment analyzer (lazy-loaded)
+        if sentiment_analyzer is not None:
+            self._sentiment_analyzer = sentiment_analyzer
+        elif use_sentiment_model:
+            self._sentiment_analyzer = get_sentiment_analyzer()
+        else:
+            self._sentiment_analyzer = None
 
     def scan(
         self,
@@ -172,13 +235,13 @@ class CuriosityEngine:
         """
         report = CuriosityReport()
 
-        # Find contradictions
+        # Find contradictions using semantic similarity
         contradictions = self._find_contradictions(
             context_filter, tag_filter, max_findings
         )
         report.contradictions = contradictions
 
-        # Find outdated knowledge
+        # Find outdated knowledge (stale, not superseded)
         outdated = self._find_outdated_knowledge(context_filter, max_findings)
         report.outdated_knowledge = outdated
 
@@ -198,38 +261,65 @@ class CuriosityEngine:
     ) -> list[Contradiction]:
         """Find potential contradictions between memories.
 
-        Looks for memories that are semantically similar but have
-        contradictory content (e.g., one says "X works" and another says "X doesn't work").
+        Uses semantic similarity (vector search) to find related memories,
+        then checks for contradictory signals (type, keywords).
+
+        This approach:
+        1. Gets recent memories as "seed" memories
+        2. For each seed, searches for semantically similar memories across DB
+        3. Checks if any similar pairs have contradictory signals
         """
         contradictions: list[Contradiction] = []
+        checked_pairs: set[tuple[str, str]] = set()
 
-        # Get memories to analyze
-        memories, _, _ = self._repo.list_memories(
-            limit=100,  # Analyze recent memories
+        # Get recent memories as seeds (smaller set to iterate)
+        seed_memories, _, _ = self._repo.list_memories(
+            limit=30,  # Recent memories as seeds
             context_filter=context_filter,
             tag_filter=tag_filter,
         )
 
-        if len(memories) < 2:
+        if len(seed_memories) < 1:
             return contradictions
 
-        # Compare pairs for contradictions
-        for i, mem_a in enumerate(memories):
+        # For each seed, find semantically similar memories
+        for seed in seed_memories:
             if len(contradictions) >= max_findings:
                 break
 
-            for mem_b in memories[i + 1 :]:
+            # Use semantic search to find similar memories across entire DB
+            similar_memories, _ = self._repo.search_by_similarity(
+                query=seed.content or seed.summary or "",
+                limit=10,
+                context_filter=context_filter,
+            )
+
+            for similar in similar_memories:
                 if len(contradictions) >= max_findings:
                     break
 
+                # Skip self-comparison
+                if similar.id == seed.id:
+                    continue
+
+                # Skip already checked pairs
+                pair = tuple(sorted([seed.id, similar.id]))
+                if pair in checked_pairs:
+                    continue
+                checked_pairs.add(pair)
+
                 # Check for contradiction signals
-                contradiction = self._check_contradiction(mem_a, mem_b)
+                contradiction = self._check_contradiction(
+                    seed, similar, similarity=similar.similarity or 0.0
+                )
                 if contradiction and contradiction.confidence >= self._min_confidence:
                     contradictions.append(contradiction)
 
         return contradictions
 
-    def _check_contradiction(self, mem_a, mem_b) -> Contradiction | None:
+    def _check_contradiction(
+        self, mem_a, mem_b, similarity: float = 0.0
+    ) -> Contradiction | None:
         """Check if two memories contradict each other."""
         # Get content for analysis
         content_a = (mem_a.content or mem_a.summary or "").lower()
@@ -253,10 +343,15 @@ class CuriosityEngine:
             confidence += 0.4
             reasons.append(keyword_contradiction)
 
+        # High semantic similarity increases confidence
+        if similarity >= self._contradiction_threshold:
+            confidence += 0.3
+            reasons.append(f"high semantic similarity ({similarity:.2f})")
+
         # Check if they share tags (more likely to be about same topic)
         shared_tags = set(mem_a.tags or []) & set(mem_b.tags or [])
         if shared_tags:
-            confidence += 0.2
+            confidence += 0.1
             reasons.append(f"shared tags: {', '.join(list(shared_tags)[:3])}")
 
         if confidence >= self._min_confidence and reasons:
@@ -265,7 +360,7 @@ class CuriosityEngine:
                 memory_a_summary=mem_a.summary[:100] if mem_a.summary else "",
                 memory_b_id=mem_b.id,
                 memory_b_summary=mem_b.summary[:100] if mem_b.summary else "",
-                similarity=len(shared_tags) / max(len(mem_a.tags or [1]), 1),
+                similarity=similarity,
                 reason=" | ".join(reasons),
                 confidence=min(confidence, 1.0),
             )
@@ -277,9 +372,13 @@ class CuriosityEngine:
         type_a = mem_a.memory_type
         type_b = mem_b.memory_type
 
+        # Normalize types (might be string or enum)
+        type_a_str = str(type_a).lower() if type_a else ""
+        type_b_str = str(type_b).lower() if type_b else ""
+
         # Success vs Failure on overlapping tags is suspicious
-        if (type_a == "success" and type_b == "failure") or (
-            type_a == "failure" and type_b == "success"
+        if ("success" in type_a_str and "failure" in type_b_str) or (
+            "failure" in type_a_str and "success" in type_b_str
         ):
             shared_tags = set(mem_a.tags or []) & set(mem_b.tags or [])
             if shared_tags:
@@ -290,15 +389,27 @@ class CuriosityEngine:
     def _check_keyword_contradiction(
         self, content_a: str, content_b: str
     ) -> str | None:
-        """Check for contradictory keywords in content."""
-        # Check if one has positive keywords and other has negative
+        """Check for contradictory sentiment in content.
+
+        Uses BERT-based sentiment analysis if available, falls back to
+        keyword-based detection otherwise.
+        """
+        # Try BERT-based sentiment analysis first
+        if self._sentiment_analyzer and self._sentiment_analyzer.is_available():
+            is_contradictory, reason = self._sentiment_analyzer.is_contradictory(
+                content_a, content_b, min_confidence=0.7
+            )
+            if is_contradictory:
+                return f"🤖 {reason}"
+
+        # Fallback to keyword-based detection
         a_positive = any(kw in content_a for kw in CONTRADICTION_KEYWORDS["positive"])
         a_negative = any(kw in content_a for kw in CONTRADICTION_KEYWORDS["negative"])
         b_positive = any(kw in content_b for kw in CONTRADICTION_KEYWORDS["positive"])
         b_negative = any(kw in content_b for kw in CONTRADICTION_KEYWORDS["negative"])
 
         if (a_positive and b_negative) or (a_negative and b_positive):
-            return "contradictory sentiment detected"
+            return "contradictory sentiment detected (keyword-based)"
 
         return None
 
@@ -307,18 +418,20 @@ class CuriosityEngine:
         context_filter: str | None,
         max_findings: int,
     ) -> list[OutdatedKnowledge]:
-        """Find knowledge that may be outdated.
+        """Find knowledge that may be outdated (stale and not superseded).
 
-        Looks for:
-        - Memories that have been superseded but are still frequently accessed
-        - Old decisions that haven't been reviewed
+        Looks for memories that:
+        1. Haven't been updated/accessed for a long time (stale_days)
+        2. Are NOT already marked as superseded (important decisions left unreviewed)
+        3. Are of type INSIGHT or DECISION (not just notes/logs)
         """
         outdated: list[OutdatedKnowledge] = []
+        now = datetime.now(timezone.utc)
+        stale_threshold = now - timedelta(days=self._stale_days)
 
-        # Find memories with supersedes relationships
-        # These are candidates for "outdated" knowledge
+        # Get memories to analyze (focus on important types)
         memories, _, _ = self._repo.list_memories(
-            limit=50,
+            limit=100,
             context_filter=context_filter,
             type_filter=None,
         )
@@ -327,26 +440,66 @@ class CuriosityEngine:
             if len(outdated) >= max_findings:
                 break
 
-            # Check if this memory has been superseded
-            links = self._repo.get_links(mem.id)
-            for link in links:
-                if link.relation_type == "supersedes":
-                    # This memory supersedes something - the target might be outdated
-                    target = self._repo.get_by_id(link.target_id)
-                    if target:
-                        outdated.append(
-                            OutdatedKnowledge(
-                                memory_id=target.id,
-                                summary=target.summary[:100] if target.summary else "",
-                                superseded_by_id=mem.id,
-                                superseded_by_summary=(
-                                    mem.summary[:100] if mem.summary else ""
-                                ),
-                                reason="This knowledge has been superseded by newer information",
-                            )
-                        )
+            # Skip recent memories
+            last_updated = mem.updated_at or mem.created_at
+            if last_updated:
+                # Ensure timezone-aware comparison
+                if last_updated.tzinfo is None:
+                    last_updated = last_updated.replace(tzinfo=timezone.utc)
+                if last_updated > stale_threshold:
+                    continue
+
+            # Focus on important memory types that should be reviewed
+            mem_type_str = str(mem.memory_type).lower() if mem.memory_type else ""
+            if mem_type_str not in ["insight", "decision"]:
+                continue
+
+            # Check if this memory has been superseded (incoming supersedes link)
+            # If it's already superseded, it's "resolved" outdated, not "neglected"
+            is_superseded = self._check_if_superseded(mem.id)
+            if is_superseded:
+                continue
+
+            # This is a stale, important memory that hasn't been reviewed/superseded
+            if last_updated:
+                # Ensure timezone-aware for calculation
+                if last_updated.tzinfo is None:
+                    last_updated = last_updated.replace(tzinfo=timezone.utc)
+                days_old = (now - last_updated).days
+            else:
+                days_old = None
+            outdated.append(
+                OutdatedKnowledge(
+                    memory_id=mem.id,
+                    summary=mem.summary[:100] if mem.summary else "",
+                    superseded_by_id=None,
+                    superseded_by_summary=None,
+                    reason=f"This {mem_type_str} is {days_old} days old and hasn't been reviewed or superseded",
+                    days_since_update=days_old,
+                )
+            )
 
         return outdated
+
+    def _check_if_superseded(self, memory_id: str) -> bool:
+        """Check if a memory has been superseded by another memory."""
+        # Get all memories that link TO this memory with 'supersedes'
+        # This requires checking who points to this memory
+        try:
+            # Get memories that might supersede this one
+            # We need to search for links where this memory is the target
+            all_memories, _, _ = self._repo.list_memories(limit=50)
+            for mem in all_memories:
+                links = self._repo.get_links(mem.id)
+                for link in links:
+                    if (
+                        link.target_id == memory_id
+                        and link.relation_type == "supersedes"
+                    ):
+                        return True
+        except Exception as e:
+            logger.warning(f"Error checking supersedes for {memory_id}: {e}")
+        return False
 
     def _generate_questions(self, report: CuriosityReport) -> list[str]:
         """Generate human-like questions based on findings."""
@@ -354,20 +507,20 @@ class CuriosityEngine:
 
         if report.contradictions:
             questions.append(
-                "🤔 I noticed some memories that might contradict each other. "
-                "Are both still valid, or has your understanding changed?"
+                "🤔 いくつかの記憶が矛盾しているようです。"
+                "両方とも有効ですか？それとも理解が変わりましたか？"
             )
 
         if report.outdated_knowledge:
             questions.append(
-                "📅 Some knowledge has been superseded. "
-                "Should the old information be archived or is it still relevant in some contexts?"
+                "📅 古くなった知識が見つかりました。"
+                "まだ有効ですか？新しい情報で更新が必要では？"
             )
 
         if not report.contradictions and not report.outdated_knowledge:
             questions.append(
-                "✨ Your knowledge base looks consistent! "
-                "Keep recording insights to build stronger patterns."
+                "✨ 知識ベースは一貫しています！"
+                "引き続き知見を記録して、より強いパターンを構築しましょう。"
             )
 
         return questions
@@ -383,7 +536,7 @@ class CuriosityEngine:
 
         if report.outdated_knowledge:
             parts.append(
-                f"Found {len(report.outdated_knowledge)} potentially outdated item(s)"
+                f"Found {len(report.outdated_knowledge)} potentially stale item(s) needing review"
             )
 
         if not parts:

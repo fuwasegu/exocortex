@@ -182,6 +182,16 @@ AIエージェントのための「第二の脳」Exocortex の実践的な使�
 - 「DBの設計について疑問を投げかけて」
 - 「プロジェクトの不整合をスキャンして」
 
+**🤖 Optional: BERTベースのセンチメント分析**
+
+より高精度な判定のため、`exocortex[sentiment]` をインストールできます：
+
+```bash
+pip install exocortex[sentiment]
+```
+
+未インストールの場合はキーワードベース判定（十分な精度）が使用されます。
+
 ---
 
 ### 🌐 関連記憶の探索 (`exo_explore_related`)
