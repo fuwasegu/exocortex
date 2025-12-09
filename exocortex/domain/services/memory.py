@@ -400,7 +400,7 @@ class MemoryService:
         ]
 
         # 2. Get health status
-        health_result = self._health_analyzer.analyze_knowledge()
+        health_result = self._health_analyzer.analyze()
         health_score = health_result.health_score
         health_summary = self._get_health_summary(health_score, health_result.issues)
 
