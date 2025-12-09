@@ -246,3 +246,99 @@ class LinkMixin(BaseRepositoryMixin):
                 result_dict["by_context"].append(self._row_to_memory(row))
 
         return result_dict
+
+    # =========================================================================
+    # Temporal Reasoning (Phase 2.3)
+    # =========================================================================
+
+    def trace_lineage(
+        self,
+        memory_id: str,
+        direction: str = "backward",
+        relation_types: list[str] | None = None,
+        max_depth: int = 10,
+    ) -> list[dict]:
+        """Trace the lineage of a memory through temporal relationships.
+
+        Follows relationships like EVOLVED_FROM, CAUSED_BY, REJECTED_BECAUSE
+        to build a timeline of how decisions/code evolved.
+
+        Args:
+            memory_id: Starting memory ID.
+            direction: "backward" (find ancestors) or "forward" (find descendants).
+            relation_types: List of relation types to follow. Defaults to temporal types.
+            max_depth: Maximum traversal depth to prevent infinite loops.
+
+        Returns:
+            List of lineage nodes, each containing:
+            - id: Memory ID
+            - summary: Memory summary
+            - memory_type: Type of memory
+            - created_at: Creation timestamp
+            - depth: Distance from starting node
+            - relation_type: How this node relates to its parent
+            - reason: Why the relationship exists
+        """
+        if relation_types is None:
+            # Default to temporal reasoning relationships
+            relation_types = ["evolved_from", "caused_by", "rejected_because", "supersedes"]
+
+        # Use iterative approach with multiple hops
+        lineage: list[dict] = []
+        visited: set[str] = {memory_id}
+        current_ids = [memory_id]
+        depth = 0
+
+        while current_ids and depth < max_depth:
+            depth += 1
+            next_ids = []
+
+            for current_id in current_ids:
+                if direction == "backward":
+                    query = """
+                        MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(target:Memory)
+                        WHERE r.relation_type IN $relation_types
+                        RETURN target.id, target.summary, target.memory_type,
+                               target.created_at, r.relation_type, r.reason
+                        ORDER BY target.created_at DESC
+                    """
+                else:
+                    query = """
+                        MATCH (source:Memory)-[r:RELATED_TO]->(m:Memory {id: $id})
+                        WHERE r.relation_type IN $relation_types
+                        RETURN source.id, source.summary, source.memory_type,
+                               source.created_at, r.relation_type, r.reason
+                        ORDER BY source.created_at ASC
+                    """
+
+                result = self._execute_read(
+                    query,
+                    parameters={"id": current_id, "relation_types": relation_types},
+                )
+
+                while result.has_next():
+                    row = result.get_next()
+                    node_id = row[0]
+
+                    if node_id not in visited:
+                        visited.add(node_id)
+                        next_ids.append(node_id)
+                        lineage.append({
+                            "id": node_id,
+                            "summary": row[1],
+                            "memory_type": row[2],
+                            "created_at": row[3].isoformat() if row[3] else None,
+                            "depth": depth,
+                            "relation_type": row[4],
+                            "reason": row[5] if row[5] else None,
+                        })
+
+            current_ids = next_ids
+
+        # Sort by created_at for chronological order
+        lineage.sort(
+            key=lambda x: x["created_at"] if x["created_at"] else "",
+            reverse=(direction == "backward"),
+        )
+
+        return lineage
