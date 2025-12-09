@@ -282,7 +282,9 @@ class TestMemoryAnalyzerAnalyze:
         )
 
         # Should detect success after failure
-        success_insights = [i for i in insights if i.insight_type == "success_after_failure"]
+        success_insights = [
+            i for i in insights if i.insight_type == "success_after_failure"
+        ]
         assert len(success_insights) == 1
         assert success_insights[0].related_memory_id == "failure-id"
 
@@ -361,7 +363,9 @@ class TestKnowledgeHealthAnalyzer:
 
         result = analyzer.analyze()
 
-        connectivity_issues = [i for i in result.issues if i.issue_type == "low_connectivity"]
+        connectivity_issues = [
+            i for i in result.issues if i.issue_type == "low_connectivity"
+        ]
         assert len(connectivity_issues) == 1
         assert "18/20 memories have no links" in connectivity_issues[0].message
 
@@ -462,18 +466,26 @@ class TestPatternConsolidator:
         """Should find clusters of similar memories."""
         memories = [
             self._create_mock_memory("m1", "Database connection pooling", ["database"]),
-            self._create_mock_memory("m2", "Connection pool configuration", ["database"]),
+            self._create_mock_memory(
+                "m2", "Connection pool configuration", ["database"]
+            ),
             self._create_mock_memory("m3", "Pool size optimization", ["database"]),
         ]
         mock_repo.get_memories_by_tag.return_value = memories
         mock_repo.search_similar_patterns.return_value = []
-        mock_repo.create_pattern.return_value = ("pattern-1", "Pattern summary", [0.1] * 384)
+        mock_repo.create_pattern.return_value = (
+            "pattern-1",
+            "Pattern summary",
+            [0.1] * 384,
+        )
 
         consolidator = PatternConsolidator(repository=mock_repo)
 
         result = consolidator.consolidate(tag_filter="database", min_cluster_size=3)
 
-        assert result["patterns_created"] >= 0  # May or may not create based on similarity
+        assert (
+            result["patterns_created"] >= 0
+        )  # May or may not create based on similarity
 
     def test_existing_pattern_linking(self, mock_repo):
         """Should link to existing pattern if similar enough."""
@@ -497,9 +509,15 @@ class TestPatternConsolidator:
     def test_synthesize_content(self, mock_repo):
         """Should synthesize pattern content from cluster."""
         memories = [
-            self._create_mock_memory("m1", "Memory about caching", ["caching", "performance"]),
-            self._create_mock_memory("m2", "Another caching insight", ["caching", "redis"]),
-            self._create_mock_memory("m3", "Cache optimization", ["caching", "performance"]),
+            self._create_mock_memory(
+                "m1", "Memory about caching", ["caching", "performance"]
+            ),
+            self._create_mock_memory(
+                "m2", "Another caching insight", ["caching", "redis"]
+            ),
+            self._create_mock_memory(
+                "m3", "Cache optimization", ["caching", "performance"]
+            ),
         ]
 
         consolidator = PatternConsolidator(repository=mock_repo)
@@ -541,11 +559,14 @@ class TestPatternConsolidator:
         ]
         mock_repo.get_frequently_accessed_memories.return_value = memories
         mock_repo.search_similar_patterns.return_value = []
-        mock_repo.create_pattern.return_value = ("pattern-1", "Pattern summary", [0.1] * 384)
+        mock_repo.create_pattern.return_value = (
+            "pattern-1",
+            "Pattern summary",
+            [0.1] * 384,
+        )
 
         consolidator = PatternConsolidator(repository=mock_repo)
 
         result = consolidator.consolidate(tag_filter=None, min_cluster_size=3)
 
         mock_repo.get_frequently_accessed_memories.assert_called_once()
-
