@@ -191,6 +191,7 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_update_memory` | Update content, tags, or type of a memory |
 | `exo_explore_related` | Discover related memories via graph traversal |
 | `exo_get_memory_links` | Get all outgoing links from a memory |
+| `exo_trace_lineage` | 🕰️ Trace the evolution/lineage of a memory (temporal reasoning) |
 | `exo_analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
 | `exo_sleep` | Trigger background consolidation (deduplication, orphan rescue) |
 | `exo_consolidate` | Extract abstract patterns from memory clusters |
@@ -293,6 +294,46 @@ AI: "Stored and linked to 2 related memories."
 | `contradicts` | This memory contradicts the target |
 | `extends` | This memory extends/elaborates the target |
 | `depends_on` | This memory depends on the target |
+| `evolved_from` | This memory evolved from the target (temporal reasoning) |
+| `rejected_because` | This memory was rejected due to the target |
+| `caused_by` | This memory was caused by the target |
+
+### Temporal Reasoning with `exo_trace_lineage`
+
+Trace the **lineage of decisions and knowledge** over time. Understand WHY something became the way it is.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `memory_id` | Starting memory ID | `"abc123"` |
+| `direction` | `"backward"` (find ancestors) or `"forward"` (find descendants) | `"backward"` |
+| `relation_types` | Relations to follow | `["evolved_from", "caused_by"]` |
+| `max_depth` | Maximum traversal depth | `10` (default) |
+
+**Example: Understanding Why a Decision Was Made**
+
+```
+Current Architecture Decision
+    │
+    ▼ trace_lineage(direction="backward")
+    │
+    ├─ [depth 1] Previous Design (evolved_from)
+    │      "Switched from monolith to microservices"
+    │
+    └─ [depth 2] Original Problem (caused_by)
+           "Scaling issues with single database"
+```
+
+**Usage:**
+```
+AI: exo_trace_lineage(memory_id="current-decision", direction="backward")
+    ↓
+Result: Shows the evolution chain of how the current decision came to be
+```
+
+**Use Cases:**
+- 🔍 **Architecture archaeology**: "Why did we choose this approach?"
+- 🐛 **Root cause analysis**: "What led to this bug?"
+- 📚 **Knowledge evolution**: "How has our understanding changed?"
 
 ## Environment Variables
 

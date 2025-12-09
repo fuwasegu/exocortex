@@ -830,6 +830,76 @@ def explore_related(
 
 
 # =============================================================================
+# Temporal Reasoning Tools (Phase 2.3)
+# =============================================================================
+
+
+@mcp.tool(name="exo_trace_lineage")
+def trace_lineage(
+    memory_id: str,
+    direction: str = "backward",
+    relation_types: list[str] | None = None,
+    max_depth: int = 10,
+) -> dict[str, Any]:
+    """Trace the lineage/history of a memory through temporal relationships.
+
+    Follow relationships like EVOLVED_FROM, CAUSED_BY, REJECTED_BECAUSE
+    to understand how decisions and code evolved over time.
+
+    This enables "causal reasoning" - understanding WHY something became
+    the way it is by tracing its history.
+
+    Args:
+        memory_id: Starting memory ID to trace from.
+        direction: "backward" to find ancestors (what this evolved from),
+                   "forward" to find descendants (what evolved from this).
+        relation_types: List of relation types to follow. Defaults to:
+                       ["evolved_from", "caused_by", "rejected_because", "supersedes"]
+        max_depth: Maximum traversal depth (default: 10).
+
+    Returns:
+        Lineage chain with each node containing:
+        - id, summary, memory_type, created_at
+        - depth: distance from starting node
+        - relation_type: how it relates to parent
+        - reason: why the relationship exists
+
+    Example usage:
+        - "Why did we choose this architecture?" → trace_lineage(current_decision, "backward")
+        - "What problems did this change cause?" → trace_lineage(change_id, "forward")
+    """
+    container = get_container()
+
+    # Use repository directly for lineage tracing
+    lineage = container.repository.trace_lineage(
+        memory_id=memory_id,
+        direction=direction,
+        relation_types=relation_types,
+        max_depth=max_depth,
+    )
+
+    # Get the starting memory info
+    start_memory = container.repository.get_by_id(memory_id)
+    start_info = None
+    if start_memory:
+        start_info = {
+            "id": start_memory.id,
+            "summary": start_memory.summary,
+            "memory_type": start_memory.memory_type.value,
+            "created_at": start_memory.created_at.isoformat(),
+        }
+
+    return {
+        "success": True,
+        "start_memory": start_info,
+        "direction": direction,
+        "lineage": lineage,
+        "total_nodes": len(lineage),
+        "max_depth_reached": max(node["depth"] for node in lineage) if lineage else 0,
+    }
+
+
+# =============================================================================
 # Analytics & Health Tools
 # =============================================================================
 
