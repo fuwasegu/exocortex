@@ -134,6 +134,55 @@ class LinkMixin(BaseRepositoryMixin):
 
         return links
 
+    def get_incoming_links(
+        self, memory_id: str, relation_type: RelationType | None = None
+    ) -> list[MemoryLink]:
+        """Get all incoming links to a memory (links pointing TO this memory).
+
+        This is useful for finding memories that supersede, contradict, or
+        reference the given memory.
+
+        Args:
+            memory_id: The target memory ID.
+            relation_type: Optional filter by relation type.
+
+        Returns:
+            List of MemoryLink objects representing incoming links.
+            Note: source_id is stored in target_id field for compatibility.
+        """
+        if relation_type:
+            query = """
+                MATCH (s:Memory)-[r:RELATED_TO]->(t:Memory {id: $id})
+                WHERE r.relation_type = $relation_type
+                RETURN s.id, s.summary, r.relation_type, r.reason, r.created_at
+            """
+            params = {"id": memory_id, "relation_type": relation_type.value}
+        else:
+            query = """
+                MATCH (s:Memory)-[r:RELATED_TO]->(t:Memory {id: $id})
+                RETURN s.id, s.summary, r.relation_type, r.reason, r.created_at
+            """
+            params = {"id": memory_id}
+
+        result = self._execute_read(query, parameters=params)
+
+        links: list[MemoryLink] = []
+        while result.has_next():
+            row = result.get_next()
+            # Note: We store source_id in target_id field for API compatibility
+            # The caller should interpret this as "source memory that links to us"
+            links.append(
+                MemoryLink(
+                    target_id=row[0],  # Actually the source memory ID
+                    target_summary=row[1],
+                    relation_type=RelationType(row[2]),
+                    reason=row[3] if row[3] else None,
+                    created_at=row[4],
+                )
+            )
+
+        return links
+
     # =========================================================================
     # Delete Link
     # =========================================================================

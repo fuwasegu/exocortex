@@ -162,6 +162,38 @@ Trace the **evolution and history** of a memory. Understand how decisions evolve
 
 ---
 
+### 🤔 Curiosity Scan (`exo_curiosity_scan`)
+
+Scan your knowledge base for contradictions, outdated info, and generate questions.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `context_filter` | Filter by project | `"my-webapp"` |
+| `tag_filter` | Filter by tags | `["architecture"]` |
+| `max_findings` | Max findings per category | `10` (default) |
+
+**What it detects:**
+- 🔴 **Contradictions**: Success vs Failure on same topic
+- 📅 **Outdated Info**: Old knowledge not marked as superseded
+- ❓ **Questions**: Human-like questions about your knowledge
+
+**Example Prompts:**
+- "Are there any contradictions in my knowledge?"
+- "Question my assumptions about the database design"
+- "Scan for inconsistencies in my project"
+
+**🤖 Optional: BERT-based Sentiment Analysis**
+
+For higher accuracy, install `exocortex[sentiment]` to enable BERT model:
+
+```bash
+pip install exocortex[sentiment]
+```
+
+Without it, keyword-based detection is used (works well for most cases).
+
+---
+
 ### 🌐 Explore Related (`exo_explore_related`)
 
 Explore related knowledge starting from a memory.
@@ -284,6 +316,26 @@ Diagnose knowledge base health.
 1. exo_recall_memories for related design patterns
 2. exo_explore_related for surrounding knowledge
 3. Compare with past decisions and advise
+```
+
+### 🤔 Knowledge Quality Flow
+
+```
+💬 "Are there any issues with my knowledge base?"
+
+1. exo_curiosity_scan to detect contradictions and outdated info
+2. Review the generated questions
+3. Link contradicting memories with evolved_from or supersedes
+4. Mark outdated memories as superseded
+```
+
+**Example:**
+```
+Contradiction detected:
+├─ "Caching works great" (success)
+└─ "Caching failed badly" (failure)
+    ↳ Link with evolved_from if it was a learning journey
+    ↳ Link with supersedes if one replaces the other
 ```
 
 ### 🕰️ Decision Archaeology Flow

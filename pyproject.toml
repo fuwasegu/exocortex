@@ -1,6 +1,6 @@
 [project]
 name = "exocortex"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local MCP Server acting as your external brain for development insights."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,10 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
+]
+sentiment = [
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
 ]
 
 [project.scripts]
@@ -61,3 +65,10 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.8",
+]

@@ -22,11 +22,13 @@ from ..models import (
     StoreMemoryResult,
 )
 from .analyzer import MemoryAnalyzer
+from .curiosity import CuriosityEngine, CuriosityReport
 from .health import KnowledgeHealthAnalyzer
 from .pattern import PatternConsolidator
 
 if TYPE_CHECKING:
     from ...infra.repositories import MemoryRepository
+    from ..models import SessionBriefing, SuggestedAction
 
 
 class MemoryService:
@@ -72,6 +74,10 @@ class MemoryService:
         )
         self._pattern_consolidator = PatternConsolidator(
             repository=repository,
+        )
+        self._curiosity_engine = CuriosityEngine(
+            repository=repository,
+            contradiction_threshold=contradiction_threshold,
         )
 
     def _validate_input(self, content: str, context_name: str, tags: list[str]) -> None:
@@ -320,3 +326,246 @@ class MemoryService:
             min_cluster_size=min_cluster_size,
             similarity_threshold=similarity_threshold,
         )
+
+    # =========================================================================
+    # Curiosity Engine
+    # =========================================================================
+
+    def curiosity_scan(
+        self,
+        context_filter: str | None = None,
+        tag_filter: list[str] | None = None,
+        max_findings: int = 10,
+    ) -> CuriosityReport:
+        """Scan the knowledge base for interesting findings.
+
+        The Curiosity Engine looks for:
+        - Contradictions between memories
+        - Outdated knowledge that may need revision
+        - Knowledge gaps that could be filled
+
+        Delegates to CuriosityEngine.
+
+        Args:
+            context_filter: Optional context to focus on.
+            tag_filter: Optional tags to focus on.
+            max_findings: Maximum findings per category.
+
+        Returns:
+            CuriosityReport with findings and questions.
+        """
+        return self._curiosity_engine.scan(
+            context_filter=context_filter,
+            tag_filter=tag_filter,
+            max_findings=max_findings,
+        )
+
+    # =========================================================================
+    # Session Briefing
+    # =========================================================================
+
+    def get_session_briefing(
+        self,
+        context_filter: str | None = None,
+    ) -> SessionBriefing:
+        """Get a briefing for the start of a session.
+
+        Provides context about the current state of the knowledge base
+        and suggests actions to take.
+
+        Args:
+            context_filter: Optional context to focus on.
+
+        Returns:
+            SessionBriefing with current state and suggested actions.
+        """
+        from ..models import SessionBriefing
+
+        # 1. Get recent memories
+        recent_memories_raw, total_count, _ = self._repo.list_memories(
+            limit=5,
+            context_filter=context_filter,
+        )
+        recent_memories = [
+            {
+                "id": m.id,
+                "summary": m.summary[:100] + "..."
+                if len(m.summary) > 100
+                else m.summary,
+                "type": m.memory_type.value,
+                "created_at": m.created_at.isoformat(),
+                "context": m.context,
+            }
+            for m in recent_memories_raw
+        ]
+
+        # 2. Get health status
+        health_result = self._health_analyzer.analyze()
+        health_score = health_result.health_score
+        health_summary = self._get_health_summary(health_score, health_result.issues)
+
+        # 3. Run curiosity scan for issues
+        curiosity_report = self._curiosity_engine.scan(
+            context_filter=context_filter,
+            max_findings=5,
+        )
+        pending_issues = self._extract_pending_issues(curiosity_report)
+
+        # 4. Get context summary (from repository stats)
+        try:
+            repo_stats = self._repo.get_stats()
+            context_summary = {}
+            # MemoryStats is a Pydantic model, access via attributes
+            if hasattr(repo_stats, "memories_by_type"):
+                # Use memories_by_type as a proxy for context info
+                context_summary = {"total": repo_stats.total_memories}
+        except Exception:
+            context_summary = {}
+
+        # 5. Generate suggested actions
+        suggested_actions = self._generate_suggested_actions(
+            health_score=health_score,
+            health_issues=health_result.issues,
+            curiosity_report=curiosity_report,
+            total_count=total_count,
+            context_filter=context_filter,
+        )
+
+        return SessionBriefing(
+            recent_memories=recent_memories,
+            total_memories=total_count,
+            health_score=health_score,
+            health_summary=health_summary,
+            pending_issues=pending_issues,
+            suggested_actions=suggested_actions,
+            context_summary=context_summary,
+        )
+
+    def _get_health_summary(
+        self,
+        health_score: float,
+        issues: list,
+    ) -> str:
+        """Generate a brief health summary."""
+        if health_score >= 90:
+            return "✨ Excellent - Knowledge base is well-organized"
+        elif health_score >= 70:
+            return "👍 Good - Minor improvements possible"
+        elif health_score >= 50:
+            return "⚠️ Fair - Some attention needed"
+        else:
+            issue_count = len(issues)
+            return f"🔴 Needs attention - {issue_count} issue(s) detected"
+
+    def _extract_pending_issues(
+        self,
+        curiosity_report: CuriosityReport,
+    ) -> list[dict]:
+        """Extract pending issues from curiosity report."""
+        issues = []
+
+        for contradiction in curiosity_report.contradictions[:3]:
+            issues.append(
+                {
+                    "type": "contradiction",
+                    "severity": "high",
+                    "description": contradiction.reason,
+                    "memory_ids": [
+                        contradiction.memory_a_id,
+                        contradiction.memory_b_id,
+                    ],
+                }
+            )
+
+        for outdated in curiosity_report.outdated_knowledge[:3]:
+            issues.append(
+                {
+                    "type": "outdated",
+                    "severity": "medium",
+                    "description": outdated.reason,
+                    "memory_ids": [outdated.memory_id],
+                }
+            )
+
+        return issues
+
+    def _generate_suggested_actions(
+        self,
+        health_score: float,
+        health_issues: list,
+        curiosity_report: CuriosityReport,
+        total_count: int,
+        context_filter: str | None,
+    ) -> list[SuggestedAction]:
+        """Generate suggested actions based on current state."""
+        from ..models import SuggestedAction
+
+        actions: list[SuggestedAction] = []
+
+        # Always suggest recall if there are memories
+        if total_count > 0:
+            actions.append(
+                SuggestedAction(
+                    tool="exo_recall_memories",
+                    priority="low",
+                    reason="Search existing knowledge before creating new memories",
+                    parameters={"limit": 5},
+                )
+            )
+
+        # Contradictions need resolution
+        if curiosity_report.contradictions:
+            first = curiosity_report.contradictions[0]
+            actions.append(
+                SuggestedAction(
+                    tool="exo_link_memories",
+                    priority="high",
+                    reason=f"Resolve contradiction: {first.reason[:50]}...",
+                    parameters={
+                        "source_id": first.memory_a_id,
+                        "target_id": first.memory_b_id,
+                        "relation_type": "supersedes",
+                    },
+                )
+            )
+
+        # Outdated knowledge needs review
+        if curiosity_report.outdated_knowledge:
+            first = curiosity_report.outdated_knowledge[0]
+            actions.append(
+                SuggestedAction(
+                    tool="exo_get_memory",
+                    priority="medium",
+                    reason=f"Review potentially outdated: {first.reason[:50]}...",
+                    parameters={"memory_id": first.memory_id},
+                )
+            )
+
+        # Health issues
+        orphan_issue = next(
+            (i for i in health_issues if i.issue_type == "orphan_memories"),
+            None,
+        )
+        if orphan_issue:
+            actions.append(
+                SuggestedAction(
+                    tool="exo_analyze_knowledge",
+                    priority="medium",
+                    reason=f"Found {orphan_issue.count} orphan memories without tags",
+                    parameters={},
+                )
+            )
+
+        # If everything is clean and enough memories, suggest exploration
+        is_clean = not actions or (len(actions) == 1 and actions[0].priority == "low")
+        if is_clean and total_count > 10:
+            actions.append(
+                SuggestedAction(
+                    tool="exo_consolidate",
+                    priority="low",
+                    reason="Extract patterns from your knowledge base",
+                    parameters={},
+                )
+            )
+
+        return actions

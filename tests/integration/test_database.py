@@ -479,3 +479,137 @@ class TestTraceLineage:
 
         # No duplicates in the result
         assert len(lineage_ids) == len(lineage)
+
+
+class TestCuriosityEngine:
+    """Integration tests for CuriosityEngine."""
+
+    def test_curiosity_scan_basic(self, container: Container):
+        """Test that curiosity scan runs without error."""
+        service = container.memory_service
+
+        # Run scan on empty/minimal database
+        report = service.curiosity_scan()
+
+        # Should return a valid report
+        assert report is not None
+        assert hasattr(report, "contradictions")
+        assert hasattr(report, "outdated_knowledge")
+        assert hasattr(report, "questions")
+
+    def test_curiosity_detects_type_contradiction(self, container: Container):
+        """Test that success vs failure on same topic is detected."""
+        repo = container.repository
+        service = container.memory_service
+
+        # Create contradicting memories
+        repo.create_memory(
+            content="This caching approach works perfectly",
+            context_name="test-curiosity",
+            tags=["caching", "performance"],
+            memory_type=MemoryType.SUCCESS,
+        )
+        repo.create_memory(
+            content="This caching approach failed badly",
+            context_name="test-curiosity",
+            tags=["caching", "performance"],
+            memory_type=MemoryType.FAILURE,
+        )
+
+        # Scan for contradictions
+        report = service.curiosity_scan(context_filter="test-curiosity")
+
+        # Should detect contradiction
+        assert len(report.contradictions) >= 1
+        assert any(
+            "success vs failure" in c.reason.lower() for c in report.contradictions
+        )
+
+
+class TestIncomingLinks:
+    """Integration tests for get_incoming_links method."""
+
+    def test_get_incoming_links_finds_supersedes(self, container: Container):
+        """Test that incoming supersedes links are found."""
+        repo = container.repository
+
+        # Create old memory
+        old_id, _, _ = repo.create_memory(
+            content="Old architecture decision",
+            context_name="test-incoming",
+            tags=["architecture"],
+            memory_type=MemoryType.DECISION,
+        )
+
+        # Create new memory that supersedes the old one
+        new_id, _, _ = repo.create_memory(
+            content="New architecture decision",
+            context_name="test-incoming",
+            tags=["architecture"],
+            memory_type=MemoryType.DECISION,
+        )
+
+        # Create supersedes link: new -> old
+        repo.create_link(new_id, old_id, RelationType.SUPERSEDES, "Updated approach")
+
+        # Get incoming links to old memory
+        incoming = repo.get_incoming_links(old_id)
+
+        assert len(incoming) == 1
+        assert incoming[0].target_id == new_id  # Source of the link
+        assert incoming[0].relation_type == RelationType.SUPERSEDES
+
+    def test_get_incoming_links_with_filter(self, container: Container):
+        """Test filtering incoming links by relation type."""
+        repo = container.repository
+
+        # Create target memory
+        target_id, _, _ = repo.create_memory(
+            content="Target memory",
+            context_name="test-incoming-filter",
+            tags=["test"],
+            memory_type=MemoryType.NOTE,
+        )
+
+        # Create multiple source memories with different relation types
+        source1_id, _, _ = repo.create_memory(
+            content="Source 1 - supersedes",
+            context_name="test-incoming-filter",
+            tags=["test"],
+            memory_type=MemoryType.NOTE,
+        )
+        source2_id, _, _ = repo.create_memory(
+            content="Source 2 - extends",
+            context_name="test-incoming-filter",
+            tags=["test"],
+            memory_type=MemoryType.NOTE,
+        )
+
+        repo.create_link(source1_id, target_id, RelationType.SUPERSEDES)
+        repo.create_link(source2_id, target_id, RelationType.EXTENDS)
+
+        # Get all incoming links
+        all_incoming = repo.get_incoming_links(target_id)
+        assert len(all_incoming) == 2
+
+        # Get only supersedes links
+        supersedes_only = repo.get_incoming_links(target_id, RelationType.SUPERSEDES)
+        assert len(supersedes_only) == 1
+        assert supersedes_only[0].relation_type == RelationType.SUPERSEDES
+
+    def test_get_incoming_links_empty(self, container: Container):
+        """Test that empty list is returned when no incoming links."""
+        repo = container.repository
+
+        # Create isolated memory
+        isolated_id, _, _ = repo.create_memory(
+            content="Isolated memory",
+            context_name="test-incoming-empty",
+            tags=["isolated"],
+            memory_type=MemoryType.NOTE,
+        )
+
+        # Get incoming links (should be empty)
+        incoming = repo.get_incoming_links(isolated_id)
+
+        assert len(incoming) == 0
