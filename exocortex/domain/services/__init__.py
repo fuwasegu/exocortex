@@ -7,9 +7,11 @@ Main components:
 - MemoryAnalyzer: New memory analysis and insight detection
 - KnowledgeHealthAnalyzer: Knowledge base health analysis
 - PatternConsolidator: Pattern extraction from memory clusters
+- CuriosityEngine: AI that questions and wonders about the knowledge base
 """
 
 from .analyzer import MemoryAnalyzer
+from .curiosity import CuriosityEngine, CuriosityReport
 from .health import KnowledgeHealthAnalyzer
 from .memory import MemoryService
 from .pattern import PatternConsolidator
@@ -19,4 +21,6 @@ __all__ = [
     "MemoryAnalyzer",
     "KnowledgeHealthAnalyzer",
     "PatternConsolidator",
+    "CuriosityEngine",
+    "CuriosityReport",
 ]

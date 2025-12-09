@@ -940,6 +940,55 @@ def analyze_knowledge() -> dict[str, Any]:
 
 
 # =============================================================================
+# Curiosity Engine (Phase 2.5)
+# =============================================================================
+
+
+@mcp.tool(name="exo_curiosity_scan")
+def curiosity_scan(
+    context_filter: str | None = None,
+    tag_filter: list[str] | None = None,
+    max_findings: int = 10,
+) -> dict[str, Any]:
+    """Scan the knowledge base with curiosity - find contradictions and questions.
+
+    The Curiosity Engine is like a curious human that notices inconsistencies
+    and asks questions. It looks for:
+
+    🤔 **Contradictions**: "Wait, these two memories seem to contradict each other..."
+    📅 **Outdated Knowledge**: "This knowledge has been superseded, is it still valid?"
+    ❓ **Questions**: Human-like questions about your knowledge base
+
+    This tool helps you maintain a consistent and up-to-date knowledge base
+    by actively questioning it rather than just storing information.
+
+    Args:
+        context_filter: Optional context/project to focus on.
+        tag_filter: Optional tags to focus on.
+        max_findings: Maximum findings per category (default: 10).
+
+    Returns:
+        CuriosityReport with contradictions, outdated knowledge, and questions.
+
+    Example usage:
+        - "Scan my knowledge base for contradictions"
+        - "What inconsistencies exist in my architecture decisions?"
+        - "Question my assumptions about the database design"
+    """
+    container = get_container()
+    report = container.memory_service.curiosity_scan(
+        context_filter=context_filter,
+        tag_filter=tag_filter,
+        max_findings=max_findings,
+    )
+
+    return {
+        "success": True,
+        **report.to_dict(),
+    }
+
+
+# =============================================================================
 # Background Processing Tools
 # =============================================================================
 

@@ -22,6 +22,7 @@ from ..models import (
     StoreMemoryResult,
 )
 from .analyzer import MemoryAnalyzer
+from .curiosity import CuriosityEngine, CuriosityReport
 from .health import KnowledgeHealthAnalyzer
 from .pattern import PatternConsolidator
 
@@ -72,6 +73,10 @@ class MemoryService:
         )
         self._pattern_consolidator = PatternConsolidator(
             repository=repository,
+        )
+        self._curiosity_engine = CuriosityEngine(
+            repository=repository,
+            contradiction_threshold=contradiction_threshold,
         )
 
     def _validate_input(self, content: str, context_name: str, tags: list[str]) -> None:
@@ -319,4 +324,37 @@ class MemoryService:
             tag_filter=tag_filter,
             min_cluster_size=min_cluster_size,
             similarity_threshold=similarity_threshold,
+        )
+
+    # =========================================================================
+    # Curiosity Engine
+    # =========================================================================
+
+    def curiosity_scan(
+        self,
+        context_filter: str | None = None,
+        tag_filter: list[str] | None = None,
+        max_findings: int = 10,
+    ) -> CuriosityReport:
+        """Scan the knowledge base for interesting findings.
+
+        The Curiosity Engine looks for:
+        - Contradictions between memories
+        - Outdated knowledge that may need revision
+        - Knowledge gaps that could be filled
+
+        Delegates to CuriosityEngine.
+
+        Args:
+            context_filter: Optional context to focus on.
+            tag_filter: Optional tags to focus on.
+            max_findings: Maximum findings per category.
+
+        Returns:
+            CuriosityReport with findings and questions.
+        """
+        return self._curiosity_engine.scan(
+            context_filter=context_filter,
+            tag_filter=tag_filter,
+            max_findings=max_findings,
         )
