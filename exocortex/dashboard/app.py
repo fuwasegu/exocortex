@@ -19,8 +19,18 @@ from ..container import get_container
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Constants
+# =============================================================================
+
 # Path to static files
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+# =============================================================================
+# Static Pages
+# =============================================================================
 
 
 async def index(request: Request) -> HTMLResponse:
@@ -29,6 +39,11 @@ async def index(request: Request) -> HTMLResponse:
     if html_path.exists():
         return HTMLResponse(html_path.read_text())
     return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
+
+
+# =============================================================================
+# API Endpoints
+# =============================================================================
 
 
 async def api_stats(request: Request) -> JSONResponse:
@@ -226,6 +241,11 @@ async def api_health(request: Request) -> JSONResponse:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+# =============================================================================
+# Streaming Endpoints
+# =============================================================================
+
+
 async def stream_dream_log(request: Request) -> StreamingResponse:
     """Stream dream.log contents via SSE."""
     config = get_config()
@@ -335,6 +355,11 @@ async def api_graph(request: Request) -> JSONResponse:
     except Exception as e:
         logger.exception("Error getting graph data")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+# =============================================================================
+# App Factory
+# =============================================================================
 
 
 def create_dashboard_app() -> Starlette:

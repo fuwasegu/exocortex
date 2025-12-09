@@ -33,6 +33,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Dream Worker Class
+# =============================================================================
+
+
 class DreamWorker:
     """Background worker for knowledge graph consolidation.
 
@@ -349,6 +354,11 @@ class DreamWorker:
             self._container = None
 
         logger.info("Dream worker shutdown complete")
+
+
+# =============================================================================
+# Entry Point
+# =============================================================================
 
 
 def main() -> None:
