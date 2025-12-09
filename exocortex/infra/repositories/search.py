@@ -291,7 +291,7 @@ class SearchMixin(BaseRepositoryMixin):
 
         while result.has_next():
             row = result.get_next()
-            tags = [t for t in row[12] if t]
+            tags = [t for t in row[12] if t] if row[12] else []
 
             if tag_filter:
                 tag_set = set(tags)
