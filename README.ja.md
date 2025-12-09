@@ -191,6 +191,7 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_update_memory` | 記憶の内容・タグ・タイプを更新 |
 | `exo_explore_related` | グラフ探索で関連記憶を発見 |
 | `exo_get_memory_links` | 記憶のリンク一覧を取得 |
+| `exo_trace_lineage` | 🕰️ 記憶の系譜・進化を追跡（時系列推論） |
 | `exo_analyze_knowledge` | 知識ベースの健全性分析と改善提案 |
 | `exo_sleep` | バックグラウンド整理（重複検出、孤立記憶のレスキュー）を起動 |
 | `exo_consolidate` | 記憶クラスタから抽象パターンを抽出 |
@@ -293,6 +294,46 @@ AI: 「記憶しました。2つの関連記憶とリンクしました。」
 | `contradicts` | この記憶が対象と矛盾 |
 | `extends` | この記憶が対象を拡張/詳細化 |
 | `depends_on` | この記憶が対象に依存 |
+| `evolved_from` | この記憶が対象から進化（時系列推論用） |
+| `rejected_because` | この記憶は対象の理由で却下された |
+| `caused_by` | この記憶は対象によって引き起こされた |
+
+### 時系列推論 `exo_trace_lineage`
+
+意思決定や知識の**系譜を追跡**します。「なぜ今こうなっているのか」を理解できます。
+
+| パラメータ | 説明 | 例 |
+|-----------|------|-----|
+| `memory_id` | 起点となる記憶ID | `"abc123"` |
+| `direction` | `"backward"`（祖先を探す）または `"forward"`（子孫を探す） | `"backward"` |
+| `relation_types` | 辿るリレーション | `["evolved_from", "caused_by"]` |
+| `max_depth` | 最大探索深度 | `10`（デフォルト） |
+
+**例: 設計判断の経緯を理解する**
+
+```
+現在のアーキテクチャ判断
+    │
+    ▼ trace_lineage(direction="backward")
+    │
+    ├─ [depth 1] 以前の設計 (evolved_from)
+    │      「モノリスからマイクロサービスに移行」
+    │
+    └─ [depth 2] 元の問題 (caused_by)
+           「単一DBでのスケーリング問題」
+```
+
+**使い方：**
+```
+AI: exo_trace_lineage(memory_id="現在の判断", direction="backward")
+    ↓
+結果: 現在の判断に至るまでの進化の連鎖を表示
+```
+
+**ユースケース：**
+- 🔍 **アーキテクチャ考古学**: 「なぜこのアプローチを選んだ？」
+- 🐛 **根本原因分析**: 「このバグの原因は何？」
+- 📚 **知識の進化**: 「理解がどう変わってきた？」
 
 ## 環境変数
 

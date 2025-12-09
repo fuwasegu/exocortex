@@ -128,10 +128,37 @@ Connect memories to build a knowledge graph.
 | `depends_on` | Dependency | Requires prerequisite knowledge |
 | `supersedes` | Replaces | Updated knowledge |
 | `contradicts` | Conflicts | Context-dependent choices |
+| `evolved_from` | Evolved from | Decision evolved over time |
+| `rejected_because` | Rejected due to | Approach rejected for a reason |
+| `caused_by` | Caused by | Result caused by a prior event |
 
 **Example Prompts:**
 - "Link the authorization-related memories"
 - "This extends the previous pattern, link them"
+- "This decision evolved from the previous one, link with evolved_from"
+
+---
+
+### 🕰️ Trace Lineage (`exo_trace_lineage`)
+
+Trace the **evolution and history** of a memory. Understand how decisions evolved over time.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `memory_id` | Starting memory ID | Memory to trace from |
+| `direction` | `"backward"` (ancestors) or `"forward"` (descendants) | `"backward"` |
+| `relation_types` | Relations to follow | `["evolved_from", "caused_by"]` |
+| `max_depth` | Max traversal depth | `10` (default) |
+
+**Example Prompts:**
+- "Why did we make this decision? Trace its history"
+- "What led to this bug? Show the lineage"
+- "How did this architecture evolve?"
+
+**Use Cases:**
+- **Architecture archaeology**: Understand why things are the way they are
+- **Root cause analysis**: Trace problems back to their origin
+- **Decision audit**: Review the evolution of key decisions
 
 ---
 
@@ -259,6 +286,28 @@ Diagnose knowledge base health.
 3. Compare with past decisions and advise
 ```
 
+### 🕰️ Decision Archaeology Flow
+
+```
+💬 "Why did we choose this architecture?"
+
+1. exo_trace_lineage(direction="backward") to find ancestors
+2. Follow the evolved_from and caused_by chains
+3. Understand the full history of the decision
+```
+
+**Example:**
+```
+Current: Microservices Architecture
+    │
+    ▼ trace_lineage(backward)
+    │
+    ├─ [depth 1] "Migrated from monolith" (evolved_from)
+    │
+    └─ [depth 2] "Database scaling issues" (caused_by)
+           ↳ Root cause identified!
+```
+
 ---
 
 ## Prompting Tips
@@ -329,6 +378,9 @@ Things to watch out for
 - **New insight** → Link to existing related memory with `extends`
 - **Conflicting info** → Link with `contradicts`, keep both
 - **Updated info** → Create new memory, link with `supersedes`
+- **Decision evolution** → Link with `evolved_from` to track how decisions changed
+- **Root cause** → Link with `caused_by` to connect effects to causes
+- **Rejected approach** → Link with `rejected_because` to remember why something was abandoned
 
 ### 🔥 Frustration Indexing (Somatic Marker Hypothesis)
 
