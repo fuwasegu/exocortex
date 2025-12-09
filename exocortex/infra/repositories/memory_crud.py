@@ -166,6 +166,12 @@ class MemoryCrudMixin(BaseRepositoryMixin):
         2. Attempting delete-and-recreate
         3. Rolling back on failure using backup data
 
+        Warning:
+            This operation is NOT atomic at process crash level. If the process
+            is killed (OOM, SIGKILL, power loss) between deletion and recreation,
+            data may be lost. In such cases, backup data is logged for manual
+            recovery via logger.critical().
+
         Returns:
             Tuple of (success, changes, summary).
         """
