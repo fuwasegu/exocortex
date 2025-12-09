@@ -482,24 +482,22 @@ class CuriosityEngine:
         return outdated
 
     def _check_if_superseded(self, memory_id: str) -> bool:
-        """Check if a memory has been superseded by another memory."""
-        # Get all memories that link TO this memory with 'supersedes'
-        # This requires checking who points to this memory
+        """Check if a memory has been superseded by another memory.
+
+        Uses get_incoming_links to efficiently find all memories that
+        link TO this memory with 'supersedes' relation.
+        """
         try:
-            # Get memories that might supersede this one
-            # We need to search for links where this memory is the target
-            all_memories, _, _ = self._repo.list_memories(limit=50)
-            for mem in all_memories:
-                links = self._repo.get_links(mem.id)
-                for link in links:
-                    if (
-                        link.target_id == memory_id
-                        and link.relation_type == "supersedes"
-                    ):
-                        return True
+            # Get incoming links with 'supersedes' relation type
+            from ...domain.models import RelationType
+
+            incoming_links = self._repo.get_incoming_links(
+                memory_id, relation_type=RelationType.SUPERSEDES
+            )
+            return len(incoming_links) > 0
         except Exception as e:
             logger.warning(f"Error checking supersedes for {memory_id}: {e}")
-        return False
+            return False
 
     def _generate_questions(self, report: CuriosityReport) -> list[str]:
         """Generate human-like questions based on findings."""

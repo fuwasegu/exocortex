@@ -168,4 +168,3 @@ class TestSentimentEnum:
         """Sentiment value should be a string."""
         assert Sentiment.POSITIVE.value == "positive"
         assert isinstance(Sentiment.POSITIVE.value, str)
-

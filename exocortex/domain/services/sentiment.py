@@ -253,4 +253,3 @@ def get_sentiment_analyzer() -> SentimentAnalyzer:
     if _global_analyzer is None:
         _global_analyzer = SentimentAnalyzer()
     return _global_analyzer
-
