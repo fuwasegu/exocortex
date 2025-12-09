@@ -300,7 +300,10 @@ class MemoryCrudMixin(BaseRepositoryMixin):
                         MATCH (m:Memory {id: $memory_id}), (c:Context {name: $context_name})
                         CREATE (m)-[:ORIGINATED_IN]->(c)
                         """,
-                        parameters={"memory_id": memory_id, "context_name": context_name},
+                        parameters={
+                            "memory_id": memory_id,
+                            "context_name": context_name,
+                        },
                     )
 
                 # Re-create tags (either new or existing)
@@ -349,7 +352,9 @@ class MemoryCrudMixin(BaseRepositoryMixin):
                 # ROLLBACK: Attempt to restore from backup if creation failed
                 logger.error(f"Update failed, attempting rollback: {e}")
                 try:
-                    self._rollback_memory(backup, existing_tags, outgoing_links, incoming_links)
+                    self._rollback_memory(
+                        backup, existing_tags, outgoing_links, incoming_links
+                    )
                 except Exception as rollback_error:
                     logger.critical(
                         f"CRITICAL: Rollback also failed for memory {memory_id}: {rollback_error}. "
@@ -640,4 +645,3 @@ class MemoryCrudMixin(BaseRepositoryMixin):
         self._release_write_lock()
         logger.debug(f"Touched {touched}/{len(memory_ids)} memories")
         return touched
-
