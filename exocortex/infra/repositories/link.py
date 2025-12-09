@@ -281,7 +281,12 @@ class LinkMixin(BaseRepositoryMixin):
         """
         if relation_types is None:
             # Default to temporal reasoning relationships
-            relation_types = ["evolved_from", "caused_by", "rejected_because", "supersedes"]
+            relation_types = [
+                "evolved_from",
+                "caused_by",
+                "rejected_because",
+                "supersedes",
+            ]
 
         # Use iterative approach with multiple hops
         lineage: list[dict] = []
@@ -323,15 +328,17 @@ class LinkMixin(BaseRepositoryMixin):
                     if node_id not in visited:
                         visited.add(node_id)
                         next_ids.append(node_id)
-                        lineage.append({
-                            "id": node_id,
-                            "summary": row[1],
-                            "memory_type": row[2],
-                            "created_at": row[3].isoformat() if row[3] else None,
-                            "depth": depth,
-                            "relation_type": row[4],
-                            "reason": row[5] if row[5] else None,
-                        })
+                        lineage.append(
+                            {
+                                "id": node_id,
+                                "summary": row[1],
+                                "memory_type": row[2],
+                                "created_at": row[3].isoformat() if row[3] else None,
+                                "depth": depth,
+                                "relation_type": row[4],
+                                "reason": row[5] if row[5] else None,
+                            }
+                        )
 
             current_ids = next_ids
 
