@@ -432,3 +432,50 @@ class TestTraceLineage:
         lineage = repo.trace_lineage(memory_id=m_id, direction="backward")
 
         assert lineage == []
+
+    def test_trace_lineage_handles_cycle(self, container: Container):
+        """Test that trace handles circular references (A -> B -> C -> A) safely."""
+        repo = container.repository
+
+        # Create three memories that form a cycle
+        m_a_id, _, _ = repo.create_memory(
+            content="Memory A",
+            context_name="test",
+            tags=["cycle"],
+            memory_type=MemoryType.NOTE,
+        )
+        m_b_id, _, _ = repo.create_memory(
+            content="Memory B",
+            context_name="test",
+            tags=["cycle"],
+            memory_type=MemoryType.NOTE,
+        )
+        m_c_id, _, _ = repo.create_memory(
+            content="Memory C",
+            context_name="test",
+            tags=["cycle"],
+            memory_type=MemoryType.NOTE,
+        )
+
+        # Create cycle: A -> B -> C -> A (evolved_from)
+        repo.create_link(m_a_id, m_b_id, RelationType.EVOLVED_FROM)
+        repo.create_link(m_b_id, m_c_id, RelationType.EVOLVED_FROM)
+        repo.create_link(m_c_id, m_a_id, RelationType.EVOLVED_FROM)
+
+        # Trace backward from A - should not infinite loop
+        lineage = repo.trace_lineage(
+            memory_id=m_a_id,
+            direction="backward",
+            relation_types=["evolved_from"],
+            max_depth=10,
+        )
+
+        # Should find B and C (but not A again due to visited set)
+        assert len(lineage) == 2
+        lineage_ids = {node["id"] for node in lineage}
+        assert m_b_id in lineage_ids
+        assert m_c_id in lineage_ids
+        assert m_a_id not in lineage_ids  # Starting node excluded
+
+        # No duplicates in the result
+        assert len(lineage_ids) == len(lineage)

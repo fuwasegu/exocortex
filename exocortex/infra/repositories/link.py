@@ -251,6 +251,27 @@ class LinkMixin(BaseRepositoryMixin):
     # Temporal Reasoning (Phase 2.3)
     # =========================================================================
 
+    def _row_to_lineage_node(self, row: list, depth: int) -> dict:
+        """Convert a database row to a lineage node dictionary.
+
+        Row column order (must match RETURN clause in trace_lineage queries):
+            0: id (memory ID)
+            1: summary (memory summary)
+            2: memory_type (type of memory)
+            3: created_at (creation timestamp)
+            4: relation_type (how this node relates to its parent)
+            5: reason (why the relationship exists)
+        """
+        return {
+            "id": row[0],
+            "summary": row[1],
+            "memory_type": row[2],
+            "created_at": row[3].isoformat() if row[3] else None,
+            "depth": depth,
+            "relation_type": row[4],
+            "reason": row[5] if row[5] else None,
+        }
+
     def trace_lineage(
         self,
         memory_id: str,
@@ -262,6 +283,8 @@ class LinkMixin(BaseRepositoryMixin):
 
         Follows relationships like EVOLVED_FROM, CAUSED_BY, REJECTED_BECAUSE
         to build a timeline of how decisions/code evolved.
+
+        Uses BFS (Breadth-First Search) with a visited set to handle cycles safely.
 
         Args:
             memory_id: Starting memory ID.
@@ -288,9 +311,16 @@ class LinkMixin(BaseRepositoryMixin):
                 "supersedes",
             ]
 
-        # Use iterative approach with multiple hops
+        # TODO: Performance optimization opportunity
+        # KùzuDB may support variable-length path queries like:
+        #   MATCH (m:Memory {id: $id})-[r:RELATED_TO*1..10]->(target:Memory)
+        #   WHERE ALL(rel IN r WHERE rel.relation_type IN $types)
+        # This could fetch all nodes in one query instead of N+1.
+        # Current Python-side BFS is safer given KùzuDB's Cypher support level.
+
+        # Use iterative BFS approach with multiple hops
         lineage: list[dict] = []
-        visited: set[str] = {memory_id}
+        visited: set[str] = {memory_id}  # Prevents cycles
         current_ids = [memory_id]
         depth = 0
 
@@ -299,6 +329,7 @@ class LinkMixin(BaseRepositoryMixin):
             next_ids = []
 
             for current_id in current_ids:
+                # Query columns: id, summary, memory_type, created_at, relation_type, reason
                 if direction == "backward":
                     query = """
                         MATCH (m:Memory {id: $id})-[r:RELATED_TO]->(target:Memory)
@@ -325,20 +356,11 @@ class LinkMixin(BaseRepositoryMixin):
                     row = result.get_next()
                     node_id = row[0]
 
+                    # Skip already visited nodes (handles cycles)
                     if node_id not in visited:
                         visited.add(node_id)
                         next_ids.append(node_id)
-                        lineage.append(
-                            {
-                                "id": node_id,
-                                "summary": row[1],
-                                "memory_type": row[2],
-                                "created_at": row[3].isoformat() if row[3] else None,
-                                "depth": depth,
-                                "relation_type": row[4],
-                                "reason": row[5] if row[5] else None,
-                            }
-                        )
+                        lineage.append(self._row_to_lineage_node(row, depth))
 
             current_ids = next_ids
 
