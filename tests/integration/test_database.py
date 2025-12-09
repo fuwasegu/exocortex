@@ -260,3 +260,175 @@ class TestDatabaseIntegration:
 
         assert result.total_memories >= 1
         assert 0 <= result.health_score <= 100
+
+
+class TestTraceLineage:
+    """Integration tests for trace_lineage (Temporal Reasoning)."""
+
+    def test_trace_lineage_backward(self, container: Container):
+        """Test tracing lineage backward to find ancestors."""
+        repo = container.repository
+
+        # Create a chain: m3 -> m2 -> m1 (evolved_from)
+        m1_id, _, _ = repo.create_memory(
+            content="Original decision",
+            context_name="test",
+            tags=["decision"],
+            memory_type=MemoryType.DECISION,
+        )
+        m2_id, _, _ = repo.create_memory(
+            content="Evolved decision v2",
+            context_name="test",
+            tags=["decision"],
+            memory_type=MemoryType.DECISION,
+        )
+        m3_id, _, _ = repo.create_memory(
+            content="Final decision v3",
+            context_name="test",
+            tags=["decision"],
+            memory_type=MemoryType.DECISION,
+        )
+
+        # Create links: m3 evolved_from m2, m2 evolved_from m1
+        repo.create_link(m2_id, m1_id, RelationType.EVOLVED_FROM, "v2 evolved from v1")
+        repo.create_link(m3_id, m2_id, RelationType.EVOLVED_FROM, "v3 evolved from v2")
+
+        # Trace backward from m3
+        lineage = repo.trace_lineage(
+            memory_id=m3_id,
+            direction="backward",
+            relation_types=["evolved_from"],
+        )
+
+        assert len(lineage) == 2
+        # Should find m2 at depth 1, m1 at depth 2
+        lineage_ids = [node["id"] for node in lineage]
+        assert m2_id in lineage_ids
+        assert m1_id in lineage_ids
+
+    def test_trace_lineage_forward(self, container: Container):
+        """Test tracing lineage forward to find descendants."""
+        repo = container.repository
+
+        # Create a chain: m1 <- m2 <- m3 (evolved_from)
+        m1_id, _, _ = repo.create_memory(
+            content="Root insight",
+            context_name="test",
+            tags=["insight"],
+            memory_type=MemoryType.INSIGHT,
+        )
+        m2_id, _, _ = repo.create_memory(
+            content="Child insight",
+            context_name="test",
+            tags=["insight"],
+            memory_type=MemoryType.INSIGHT,
+        )
+        m3_id, _, _ = repo.create_memory(
+            content="Grandchild insight",
+            context_name="test",
+            tags=["insight"],
+            memory_type=MemoryType.INSIGHT,
+        )
+
+        # Create links
+        repo.create_link(m2_id, m1_id, RelationType.EVOLVED_FROM)
+        repo.create_link(m3_id, m2_id, RelationType.EVOLVED_FROM)
+
+        # Trace forward from m1 (find what evolved FROM this)
+        lineage = repo.trace_lineage(
+            memory_id=m1_id,
+            direction="forward",
+            relation_types=["evolved_from"],
+        )
+
+        assert len(lineage) == 2
+        lineage_ids = [node["id"] for node in lineage]
+        assert m2_id in lineage_ids
+        assert m3_id in lineage_ids
+
+    def test_trace_lineage_with_multiple_relation_types(self, container: Container):
+        """Test tracing with multiple relation types."""
+        repo = container.repository
+
+        # Create memories
+        m1_id, _, _ = repo.create_memory(
+            content="Original approach",
+            context_name="test",
+            tags=["approach"],
+            memory_type=MemoryType.DECISION,
+        )
+        m2_id, _, _ = repo.create_memory(
+            content="Bug caused by original",
+            context_name="test",
+            tags=["bug"],
+            memory_type=MemoryType.FAILURE,
+        )
+        m3_id, _, _ = repo.create_memory(
+            content="Rejected due to bug",
+            context_name="test",
+            tags=["rejected"],
+            memory_type=MemoryType.DECISION,
+        )
+
+        # m2 was caused_by m1, m3 was rejected_because of m2
+        repo.create_link(m2_id, m1_id, RelationType.CAUSED_BY, "Bug caused by decision")
+        repo.create_link(
+            m3_id, m2_id, RelationType.REJECTED_BECAUSE, "Rejected due to bug"
+        )
+
+        # Trace with both relation types
+        lineage = repo.trace_lineage(
+            memory_id=m3_id,
+            direction="backward",
+            relation_types=["caused_by", "rejected_because"],
+        )
+
+        assert len(lineage) == 2
+
+    def test_trace_lineage_respects_max_depth(self, container: Container):
+        """Test that max_depth limits traversal."""
+        repo = container.repository
+
+        # Create a long chain: m5 -> m4 -> m3 -> m2 -> m1
+        memory_ids = []
+        for i in range(5):
+            m_id, _, _ = repo.create_memory(
+                content=f"Memory {i}",
+                context_name="test",
+                tags=["chain"],
+                memory_type=MemoryType.NOTE,
+            )
+            memory_ids.append(m_id)
+
+        # Link them: each evolved from the previous
+        for i in range(1, 5):
+            repo.create_link(
+                memory_ids[i], memory_ids[i - 1], RelationType.EVOLVED_FROM
+            )
+
+        # Trace with max_depth=2 from the last one
+        lineage = repo.trace_lineage(
+            memory_id=memory_ids[4],
+            direction="backward",
+            relation_types=["evolved_from"],
+            max_depth=2,
+        )
+
+        # Should only find 2 levels (m3, m2), not m1, m0
+        assert len(lineage) == 2
+        assert all(node["depth"] <= 2 for node in lineage)
+
+    def test_trace_lineage_empty_when_no_links(self, container: Container):
+        """Test that trace returns empty list when no links exist."""
+        repo = container.repository
+
+        m_id, _, _ = repo.create_memory(
+            content="Isolated memory",
+            context_name="test",
+            tags=["isolated"],
+            memory_type=MemoryType.NOTE,
+        )
+
+        lineage = repo.trace_lineage(memory_id=m_id, direction="backward")
+
+        assert lineage == []
