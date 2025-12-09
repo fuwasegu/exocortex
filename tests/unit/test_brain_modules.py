@@ -32,7 +32,9 @@ class TestHybridScoreWeights:
     def test_weights_must_sum_to_one(self) -> None:
         """Test that weights must sum to 1.0."""
         with pytest.raises(ValueError, match="Weights must sum to 1.0"):
-            HybridScoreWeights(similarity=0.5, recency=0.5, frequency=0.5, frustration=0.5)
+            HybridScoreWeights(
+                similarity=0.5, recency=0.5, frequency=0.5, frustration=0.5
+            )
 
 
 class TestMemoryDynamics:
@@ -242,4 +244,3 @@ class TestClusterAnalysis:
         assert analysis.dominant_type == "insight"
         assert analysis.memory_count == 5
         assert analysis.avg_similarity == 0.85
-
