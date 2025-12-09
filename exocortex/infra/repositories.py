@@ -37,7 +37,21 @@ class MemoryRepository:
     Supports smart connection management:
     - Read operations use read-only connections (allows concurrent access)
     - Write operations use read-write connections (exclusive lock with retry)
+
+    Sections:
+    - Infrastructure: Connection management, utilities
+    - Row Mapping: Database row to model conversion
+    - Memory CRUD: Create, Read, Update, Delete operations
+    - Search: Vector similarity search with hybrid scoring
+    - Access Tracking: Memory touch/access tracking
+    - Links: Memory relationship management
+    - Statistics: Stats and health check queries
+    - Patterns: Pattern extraction and linking
     """
+
+    # =========================================================================
+    # Infrastructure Methods
+    # =========================================================================
 
     def __init__(
         self,
@@ -128,6 +142,10 @@ class MemoryRepository:
             truncated = truncated[:last_space]
 
         return truncated + "..."
+
+    # =========================================================================
+    # Row Mapping & Tag Management
+    # =========================================================================
 
     def _create_tag_relationships(
         self, memory_id: str, tags: list[str], timestamp: datetime
@@ -331,6 +349,10 @@ class MemoryRepository:
         logger.info(f"Created memory {memory_id} with {len(tags)} tags")
         return memory_id, summary, embedding
 
+    # =========================================================================
+    # Link Operations
+    # =========================================================================
+
     def create_link(
         self,
         source_id: str,
@@ -420,6 +442,10 @@ class MemoryRepository:
             return None
 
         return self._row_to_memory(result.get_next())
+
+    # =========================================================================
+    # Search Operations
+    # =========================================================================
 
     def search_similar_by_embedding(
         self,
@@ -661,6 +687,10 @@ class MemoryRepository:
 
         return result
 
+    # =========================================================================
+    # Access Tracking
+    # =========================================================================
+
     def touch_memory(self, memory_id: str) -> bool:
         """Update memory access metadata (last_accessed_at, access_count).
 
@@ -727,6 +757,10 @@ class MemoryRepository:
         logger.debug(f"Touched {touched}/{len(memory_ids)} memories")
         return touched
 
+    # =========================================================================
+    # List & Pagination
+    # =========================================================================
+
     def list_memories(
         self,
         limit: int = 20,
@@ -780,6 +814,10 @@ class MemoryRepository:
 
         has_more = offset + len(memories) < total_count
         return memories, total_count, has_more
+
+    # =========================================================================
+    # Graph Exploration
+    # =========================================================================
 
     def get_links(self, memory_id: str) -> list[MemoryLink]:
         """Get all outgoing links from a memory."""
