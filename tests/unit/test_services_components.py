@@ -6,14 +6,12 @@ Tests for:
 - PatternConsolidator: Pattern extraction from memory clusters
 """
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
 from exocortex.domain.models import (
-    AnalyzeKnowledgeResult,
-    KnowledgeHealthIssue,
     MemoryStats,
     MemoryType,
     MemoryWithContext,
@@ -22,7 +20,6 @@ from exocortex.domain.models import (
 from exocortex.domain.services.analyzer import MemoryAnalyzer
 from exocortex.domain.services.health import KnowledgeHealthAnalyzer
 from exocortex.domain.services.pattern import PatternConsolidator
-
 
 # =============================================================================
 # MemoryAnalyzer Tests
@@ -567,6 +564,6 @@ class TestPatternConsolidator:
 
         consolidator = PatternConsolidator(repository=mock_repo)
 
-        result = consolidator.consolidate(tag_filter=None, min_cluster_size=3)
+        consolidator.consolidate(tag_filter=None, min_cluster_size=3)
 
         mock_repo.get_frequently_accessed_memories.assert_called_once()
