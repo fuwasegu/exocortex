@@ -9,3 +9,6 @@ __all__ = [
     "EmbeddingEngine",
     "MemoryRepository",
 ]
+
+# Note: MemoryRepository is now imported from .repositories package
+# (exocortex/infra/repositories/__init__.py)
