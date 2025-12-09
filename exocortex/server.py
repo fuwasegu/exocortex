@@ -21,6 +21,11 @@ from .domain.models import MemoryType, RelationType
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
 def _normalize_content(content: str) -> str:
     """Normalize content that may be wrapped in MCP TextContent format.
 
@@ -53,6 +58,64 @@ def _normalize_content(content: str) -> str:
         return content
     except (json.JSONDecodeError, TypeError, KeyError):
         return content
+
+
+def _format_memory_full(memory, include_pain: bool = False) -> dict[str, Any]:
+    """Format a memory with full details for API response.
+
+    Args:
+        memory: MemoryWithContext instance.
+        include_pain: Whether to include frustration/pain indicators.
+
+    Returns:
+        Dictionary with memory details.
+    """
+    result = {
+        "id": memory.id,
+        "content": memory.content,
+        "summary": memory.summary,
+        "memory_type": memory.memory_type.value,
+        "context": memory.context,
+        "tags": memory.tags,
+        "created_at": memory.created_at.isoformat(),
+        "updated_at": memory.updated_at.isoformat(),
+    }
+
+    if include_pain:
+        from exocortex.brain.amygdala import FrustrationIndexer
+
+        indexer = FrustrationIndexer()
+        result["similarity"] = (
+            round(memory.similarity, 3) if memory.similarity else None
+        )
+        result["frustration_score"] = (
+            round(memory.frustration_score, 3) if memory.frustration_score else 0.0
+        )
+        result["pain_indicator"] = indexer.get_pain_emoji(
+            memory.frustration_score or 0.0
+        )
+        result["time_cost_hours"] = memory.time_cost_hours
+
+    return result
+
+
+def _format_memory_brief(memory) -> dict[str, Any]:
+    """Format a memory with brief details for list/explore responses.
+
+    Args:
+        memory: MemoryWithContext instance.
+
+    Returns:
+        Dictionary with brief memory details.
+    """
+    return {
+        "id": memory.id,
+        "summary": memory.summary,
+        "memory_type": memory.memory_type.value,
+        "context": memory.context,
+        "tags": memory.tags,
+        "created_at": memory.created_at.isoformat(),
+    }
 
 
 # =============================================================================
@@ -222,7 +285,7 @@ def recall_tips() -> str:
 
 
 # =============================================================================
-# Basic Tools
+# Health Check Tools
 # =============================================================================
 
 
@@ -233,6 +296,11 @@ def ping() -> dict[str, Any]:
     Returns a simple message confirming the server is operational.
     """
     return {"status": "ok", "message": "Exocortex is operational"}
+
+
+# =============================================================================
+# Memory CRUD Tools
+# =============================================================================
 
 
 @mcp.tool(name="exo_store_memory")
@@ -433,31 +501,8 @@ def recall_memories(
         type_filter=mem_type,
     )
 
-    # Import here to avoid circular imports
-    from exocortex.brain.amygdala import FrustrationIndexer
-
-    indexer = FrustrationIndexer()
-
     return {
-        "memories": [
-            {
-                "id": m.id,
-                "content": m.content,
-                "summary": m.summary,
-                "memory_type": m.memory_type.value,
-                "context": m.context,
-                "tags": m.tags,
-                "similarity": round(m.similarity, 3) if m.similarity else None,
-                "frustration_score": round(m.frustration_score, 3)
-                if m.frustration_score
-                else 0.0,
-                "pain_indicator": indexer.get_pain_emoji(m.frustration_score or 0.0),
-                "time_cost_hours": m.time_cost_hours,
-                "created_at": m.created_at.isoformat(),
-                "updated_at": m.updated_at.isoformat(),
-            }
-            for m in memories
-        ],
+        "memories": [_format_memory_full(m, include_pain=True) for m in memories],
         "total_found": total_found,
     }
 
@@ -504,12 +549,7 @@ def list_memories(
     return {
         "memories": [
             {
-                "id": m.id,
-                "summary": m.summary,
-                "memory_type": m.memory_type.value,
-                "context": m.context,
-                "tags": m.tags,
-                "created_at": m.created_at.isoformat(),
+                **_format_memory_brief(m),
                 "updated_at": m.updated_at.isoformat(),
             }
             for m in memories
@@ -541,16 +581,7 @@ def get_memory(memory_id: str) -> dict[str, Any]:
 
     return {
         "success": True,
-        "memory": {
-            "id": memory.id,
-            "content": memory.content,
-            "summary": memory.summary,
-            "memory_type": memory.memory_type.value,
-            "context": memory.context,
-            "tags": memory.tags,
-            "created_at": memory.created_at.isoformat(),
-            "updated_at": memory.updated_at.isoformat(),
-        },
+        "memory": _format_memory_full(memory),
     }
 
 
@@ -573,6 +604,11 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
         return {"success": False, "error": f"Memory '{memory_id}' not found"}
 
     return {"success": True, "message": f"Memory '{memory_id}' deleted"}
+
+
+# =============================================================================
+# Statistics Tools
+# =============================================================================
 
 
 @mcp.tool(name="exo_get_stats")
@@ -598,7 +634,7 @@ def get_stats() -> dict[str, Any]:
 
 
 # =============================================================================
-# Advanced Tools
+# Link & Relationship Tools
 # =============================================================================
 
 
@@ -783,24 +819,19 @@ def explore_related(
         max_per_category=max_per_category,
     )
 
-    def format_memory(m):
-        return {
-            "id": m.id,
-            "summary": m.summary,
-            "memory_type": m.memory_type.value,
-            "context": m.context,
-            "tags": m.tags,
-            "created_at": m.created_at.isoformat(),
-        }
-
     return {
         "success": True,
         "source_memory_id": memory_id,
-        "linked": [format_memory(m) for m in result.get("linked", [])],
-        "by_tag": [format_memory(m) for m in result.get("by_tag", [])],
-        "by_context": [format_memory(m) for m in result.get("by_context", [])],
+        "linked": [_format_memory_brief(m) for m in result.get("linked", [])],
+        "by_tag": [_format_memory_brief(m) for m in result.get("by_tag", [])],
+        "by_context": [_format_memory_brief(m) for m in result.get("by_context", [])],
         "total_found": sum(len(v) for v in result.values()),
     }
+
+
+# =============================================================================
+# Analytics & Health Tools
+# =============================================================================
 
 
 @mcp.tool(name="exo_analyze_knowledge")
@@ -836,6 +867,11 @@ def analyze_knowledge() -> dict[str, Any]:
         "suggestions": result.suggestions,
         "stats": result.stats,
     }
+
+
+# =============================================================================
+# Background Processing Tools
+# =============================================================================
 
 
 @mcp.tool(name="exo_sleep")
