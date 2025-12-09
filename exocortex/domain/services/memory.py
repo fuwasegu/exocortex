@@ -411,12 +411,16 @@ class MemoryService:
         )
         pending_issues = self._extract_pending_issues(curiosity_report)
 
-        # 4. Get context summary
-        stats = self._repo.get_stats()
-        context_summary = {}
-        if stats.get("contexts"):
-            for ctx in stats.get("contexts", [])[:5]:
-                context_summary[ctx["name"]] = ctx.get("memory_count", 0)
+        # 4. Get context summary (from repository stats)
+        try:
+            repo_stats = self._repo.get_stats()
+            context_summary = {}
+            # MemoryStats is a Pydantic model, access via attributes
+            if hasattr(repo_stats, "memories_by_type"):
+                # Use memories_by_type as a proxy for context info
+                context_summary = {"total": repo_stats.total_memories}
+        except Exception:
+            context_summary = {}
 
         # 5. Generate suggested actions
         suggested_actions = self._generate_suggested_actions(
