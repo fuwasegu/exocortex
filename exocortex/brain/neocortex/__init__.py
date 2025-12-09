@@ -14,4 +14,3 @@ In Exocortex, this module handles:
 from .patterns import PatternExtractor
 
 __all__ = ["PatternExtractor"]
-

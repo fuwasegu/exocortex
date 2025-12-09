@@ -85,7 +85,9 @@ class PatternExtractor:
             avg_similarity=avg_similarity,
         )
 
-    def calculate_confidence(self, instance_count: int, base_confidence: float = 0.5) -> float:
+    def calculate_confidence(
+        self, instance_count: int, base_confidence: float = 0.5
+    ) -> float:
         """Calculate pattern confidence based on instance count.
 
         Args:
@@ -95,7 +97,9 @@ class PatternExtractor:
         Returns:
             Confidence score capped at max_confidence
         """
-        confidence = base_confidence + (instance_count - 1) * self.confidence_per_instance
+        confidence = (
+            base_confidence + (instance_count - 1) * self.confidence_per_instance
+        )
         return min(confidence, self.max_confidence)
 
     def should_create_pattern(self, cluster_size: int) -> bool:
@@ -108,4 +112,3 @@ class PatternExtractor:
             True if pattern should be created
         """
         return cluster_size >= self.min_cluster_size
-
