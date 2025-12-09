@@ -6,7 +6,6 @@ Tests for:
 - Question generation
 """
 
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -152,7 +151,8 @@ class TestCuriosityEngineOutdatedDetection:
         link.relation_type = "supersedes"
         link.target_id = "old-mem"
 
-        engine._repo.list_memories.return_value = ([new_memory], 1)
+        # list_memories returns 3 values: (memories, total_count, has_more)
+        engine._repo.list_memories.return_value = ([new_memory], 1, False)
         engine._repo.get_links.return_value = [link]
         engine._repo.get_by_id.return_value = old_memory
 

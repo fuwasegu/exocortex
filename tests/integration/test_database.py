@@ -479,3 +479,48 @@ class TestTraceLineage:
 
         # No duplicates in the result
         assert len(lineage_ids) == len(lineage)
+
+
+class TestCuriosityEngine:
+    """Integration tests for CuriosityEngine."""
+
+    def test_curiosity_scan_basic(self, container: Container):
+        """Test that curiosity scan runs without error."""
+        service = container.memory_service
+
+        # Run scan on empty/minimal database
+        report = service.curiosity_scan()
+
+        # Should return a valid report
+        assert report is not None
+        assert hasattr(report, "contradictions")
+        assert hasattr(report, "outdated_knowledge")
+        assert hasattr(report, "questions")
+
+    def test_curiosity_detects_type_contradiction(self, container: Container):
+        """Test that success vs failure on same topic is detected."""
+        repo = container.repository
+        service = container.memory_service
+
+        # Create contradicting memories
+        repo.create_memory(
+            content="This caching approach works perfectly",
+            context_name="test-curiosity",
+            tags=["caching", "performance"],
+            memory_type=MemoryType.SUCCESS,
+        )
+        repo.create_memory(
+            content="This caching approach failed badly",
+            context_name="test-curiosity",
+            tags=["caching", "performance"],
+            memory_type=MemoryType.FAILURE,
+        )
+
+        # Scan for contradictions
+        report = service.curiosity_scan(context_filter="test-curiosity")
+
+        # Should detect contradiction
+        assert len(report.contradictions) >= 1
+        assert any(
+            "success vs failure" in c.reason.lower() for c in report.contradictions
+        )

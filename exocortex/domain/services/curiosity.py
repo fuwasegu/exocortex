@@ -204,7 +204,7 @@ class CuriosityEngine:
         contradictions: list[Contradiction] = []
 
         # Get memories to analyze
-        memories, _ = self._repo.list_memories(
+        memories, _, _ = self._repo.list_memories(
             limit=100,  # Analyze recent memories
             context_filter=context_filter,
             tag_filter=tag_filter,
@@ -317,7 +317,7 @@ class CuriosityEngine:
 
         # Find memories with supersedes relationships
         # These are candidates for "outdated" knowledge
-        memories, _ = self._repo.list_memories(
+        memories, _, _ = self._repo.list_memories(
             limit=50,
             context_filter=context_filter,
             type_filter=None,
