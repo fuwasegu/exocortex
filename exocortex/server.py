@@ -125,77 +125,107 @@ def _format_memory_brief(memory) -> dict[str, Any]:
 SERVER_INSTRUCTIONS = """\
 Exocortex is your external brain - a persistent knowledge store for development insights.
 
+## 🚀 SESSION LIFECYCLE - Follow This Flow!
+
+### 1️⃣ SESSION START - Always call `exo_session_briefing` first!
+```
+exo_session_briefing(project_context="current-project")
+```
+This tells you:
+- Recent memories in this context
+- Knowledge base health status
+- Pending issues (contradictions, outdated info)
+- **Suggested next actions** ← Follow these!
+
+### 2️⃣ WORKING PHASE - Use the right tool chain
+
+**Storing Knowledge:**
+```
+exo_store_memory → [if suggested_links] → exo_link_memories
+                 → [if contradiction] → exo_link_memories (resolve)
+```
+
+**Finding Knowledge:**
+```
+exo_recall_memories → [need more context] → exo_explore_related
+                    → [need history] → exo_trace_lineage
+```
+
+**Understanding Decisions:**
+```
+exo_trace_lineage(direction="backward") → See why this decision was made
+exo_trace_lineage(direction="forward") → See what this decision led to
+```
+
+### 3️⃣ MAINTENANCE - Periodically (every ~10 stores or session end)
+```
+exo_curiosity_scan → [if contradictions] → exo_link_memories (resolve)
+                   → [if outdated] → exo_update_memory or add supersedes link
+exo_analyze_knowledge → [if low score] → Address issues
+```
+
+### 4️⃣ SESSION END - Consolidate
+```
+exo_sleep → Background consolidation (deduplication, pattern extraction)
+```
+
 ## 🎯 Proactive Knowledge Capture
 
 **IMPORTANT**: Actively propose storing valuable insights during conversations!
 
 ### When to Suggest Recording
-- After debugging a tricky issue → "This debugging insight could be valuable. Want me to store it?"
-- When discovering a useful pattern → "This pattern might help in future projects. Should I record it?"
-- After architectural discussions → "This decision has good reasoning. Let me save it for reference."
-- When a solution is found after multiple attempts → "The solution and failed approaches are worth remembering."
-- After explaining something complex → "This explanation could help next time. Want me to store it?"
+- After debugging a tricky issue → "This debugging insight could be valuable."
+- When discovering a useful pattern → "This pattern might help in future projects."
+- After architectural discussions → "This decision has good reasoning."
+- When a solution is found after multiple attempts → "Worth remembering the journey."
 
 ### How to Propose
 1. Summarize the key insight in 1-2 sentences
 2. Suggest appropriate tags and memory type
 3. Ask if the user wants to store it (or just do it if clearly valuable)
 
-Example:
-> "We just solved a tricky async/await issue with connection pooling.
-> This would make a good `success` memory with tags [async, database, connection-pool].
-> Should I store this for future reference?"
+## 📝 Best Practices
 
-## Best Practices for Storing Memories
+### Memory Types:
+- `insight`: General learnings and patterns
+- `success`: Solutions that worked
+- `failure`: What didn't work and why (equally valuable!)
+- `decision`: Technical decisions with reasoning
+- `note`: Quick references
 
-1. **Content Structure**: Write clear, actionable content. Use Markdown.
-   - Bad: "Fixed bug"
-   - Good: "## Database Connection Pooling Fix\\n\\nProblem: Connections exhausted...\\nSolution: Implemented..."
+### Relation Types for Linking:
+- `related`: Generally related memories
+- `supersedes`: This memory updates/replaces older one
+- `contradicts`: This memory contradicts another (needs resolution)
+- `extends`: This memory elaborates on another
+- `depends_on`: This memory depends on another
+- `evolved_from`: This memory evolved from an earlier decision
+- `caused_by`: This memory was caused by another event
 
-2. **Tagging Strategy**: Use hierarchical, reusable tags.
-   - General: python, database, performance, security
-   - Specific: sqlalchemy, postgresql, async
+### Tagging Strategy:
+- General: python, database, performance, security
+- Specific: sqlalchemy, postgresql, async
+- Project: project-name, feature-name
 
-3. **Memory Types**:
-   - `insight`: General learnings and patterns
-   - `success`: Solutions that worked
-   - `failure`: What didn't work and why
-   - `decision`: Technical decisions with reasoning
-   - `note`: Quick references
+## 🧠 MANDATORY: Post-Storage Consolidation
 
-4. **Splitting Content**: One memory = one concept. Split multi-topic content.
+When `exo_store_memory` returns, check `suggested_links`:
+- similarity > 0.7 → Call `exo_link_memories`
+- contradiction detected → Resolve with `supersedes` or `contradicts`
 
-## 🧠 MANDATORY: Post-Storage Memory Consolidation
+**This consolidation is NOT optional. Skipping it degrades knowledge quality.**
 
-**Like human sleep consolidates memories, you MUST organize after storing.**
+## 🔧 Tool Quick Reference
 
-When `exo_store_memory` returns successfully, ALWAYS perform these steps:
-
-### Step 1: Link Related Memories
-Check the `suggested_links` in the response. For each suggestion with similarity > 0.7:
-- Call `exo_link_memories` to create the relationship
-- Use the suggested relation type
-
-### Step 2: Handle Insights
-Check the `insights` in the response:
-- **duplicate_candidate**: Consider if the new memory should supersede the old one
-- **potential_contradiction**: Review and resolve with `supersedes` or `contradicts` link
-- **knowledge_gap**: Note for future learning
-
-### Step 3: Periodic Health Check
-If `should_analyze` is true in the response:
-- Call `exo_analyze_knowledge` to check overall health
-- Address any issues found (orphan memories, unlinked memories, etc.)
-
-**This consolidation is NOT optional. Skipping it degrades knowledge quality over time.**
-
-Example flow:
-```
-1. User: "Remember this pattern"
-2. You: Call exo_store_memory → get suggested_links + insights
-3. You: Call exo_link_memories for high-similarity suggestions
-4. You: Report to user: "Stored and linked to 2 related memories"
-```
+| Goal | Tool | When |
+|------|------|------|
+| Start session | `exo_session_briefing` | Always first |
+| Store knowledge | `exo_store_memory` | After insights |
+| Find knowledge | `exo_recall_memories` | Before re-solving |
+| Explore context | `exo_explore_related` | Need more context |
+| Trace history | `exo_trace_lineage` | Understand decisions |
+| Check health | `exo_curiosity_scan` | Find issues |
+| End session | `exo_sleep` | Consolidate |
 """
 
 # =============================================================================
@@ -296,6 +326,41 @@ def ping() -> dict[str, Any]:
     Returns a simple message confirming the server is operational.
     """
     return {"status": "ok", "message": "Exocortex is operational"}
+
+
+@mcp.tool(name="exo_session_briefing")
+def session_briefing(
+    project_context: str | None = None,
+) -> dict[str, Any]:
+    """Get a briefing at the start of a session.
+
+    **CALL THIS FIRST** when starting a new conversation or task.
+
+    Provides:
+    - Recent memories summary
+    - Knowledge base health status
+    - Pending issues (contradictions, outdated info)
+    - Suggested next actions
+
+    This helps you understand the current state and what actions
+    might be needed before diving into the task.
+
+    Args:
+        project_context: Optional project/context name to focus on.
+
+    Returns:
+        SessionBriefing with current state and suggested actions.
+
+    Example usage:
+        - Start of coding session → Call this to see recent context
+        - Returning to a project → Call with project_context to focus
+        - Before storing new memories → Check for similar existing ones
+    """
+    container = get_container()
+    briefing = container.memory_service.get_session_briefing(
+        context_filter=project_context,
+    )
+    return briefing.to_dict()
 
 
 # =============================================================================
@@ -501,9 +566,43 @@ def recall_memories(
         type_filter=mem_type,
     )
 
+    # Generate next_actions based on results
+    next_actions = []
+
+    if memories:
+        top_memory = memories[0]
+        # If high similarity match found, suggest exploring related
+        if top_memory.similarity and top_memory.similarity >= 0.8:
+            next_actions.append(
+                {
+                    "action": "explore_related",
+                    "priority": "medium",
+                    "description": f"Explore memories related to '{top_memory.summary[:30]}...'",
+                    "details": {
+                        "call": "exo_explore_related",
+                        "args": {"memory_id": top_memory.id},
+                    },
+                }
+            )
+
+        # If decision type, suggest tracing lineage
+        if top_memory.memory_type == MemoryType.DECISION:
+            next_actions.append(
+                {
+                    "action": "trace_lineage",
+                    "priority": "low",
+                    "description": "Trace the history of this decision",
+                    "details": {
+                        "call": "exo_trace_lineage",
+                        "args": {"memory_id": top_memory.id, "direction": "backward"},
+                    },
+                }
+            )
+
     return {
         "memories": [_format_memory_full(m, include_pain=True) for m in memories],
         "total_found": total_found,
+        "next_actions": next_actions,
     }
 
 
@@ -920,6 +1019,72 @@ def analyze_knowledge() -> dict[str, Any]:
     container = get_container()
     result = container.memory_service.analyze_knowledge()
 
+    # Generate next_actions based on issues
+    next_actions = []
+
+    for issue in result.issues[:3]:
+        if issue.issue_type == "orphan_memories" and issue.affected_memory_ids:
+            next_actions.append(
+                {
+                    "action": "fix_orphan",
+                    "priority": "medium",
+                    "description": "Add tags to orphan memory",
+                    "details": {
+                        "call": "exo_update_memory",
+                        "args": {
+                            "memory_id": issue.affected_memory_ids[0],
+                            "tags": ["needs-classification"],
+                        },
+                    },
+                }
+            )
+        elif issue.issue_type == "unlinked_memories" and issue.affected_memory_ids:
+            next_actions.append(
+                {
+                    "action": "fix_unlinked",
+                    "priority": "low",
+                    "description": "Find related memories to link",
+                    "details": {
+                        "call": "exo_explore_related",
+                        "args": {"memory_id": issue.affected_memory_ids[0]},
+                    },
+                }
+            )
+        elif issue.issue_type == "stale_memories" and issue.affected_memory_ids:
+            next_actions.append(
+                {
+                    "action": "review_stale",
+                    "priority": "low",
+                    "description": "Review and update stale memory",
+                    "details": {
+                        "call": "exo_get_memory",
+                        "args": {"memory_id": issue.affected_memory_ids[0]},
+                    },
+                }
+            )
+
+    # If health score is good, suggest consolidation
+    if result.health_score >= 80 and result.total_memories > 10:
+        next_actions.append(
+            {
+                "action": "consolidate",
+                "priority": "low",
+                "description": "Extract patterns from healthy knowledge base",
+                "details": {"call": "exo_consolidate"},
+            }
+        )
+
+    # If health score is low, suggest curiosity scan
+    if result.health_score < 70:
+        next_actions.append(
+            {
+                "action": "curiosity_scan",
+                "priority": "medium",
+                "description": "Deep scan for contradictions and outdated info",
+                "details": {"call": "exo_curiosity_scan"},
+            }
+        )
+
     return {
         "total_memories": result.total_memories,
         "health_score": round(result.health_score, 1),
@@ -936,6 +1101,7 @@ def analyze_knowledge() -> dict[str, Any]:
         ],
         "suggestions": result.suggestions,
         "stats": result.stats,
+        "next_actions": next_actions,
     }
 
 
@@ -982,9 +1148,57 @@ def curiosity_scan(
         max_findings=max_findings,
     )
 
+    # Generate next_actions based on findings
+    next_actions = []
+
+    # High priority: resolve contradictions
+    for contradiction in report.contradictions[:3]:
+        next_actions.append(
+            {
+                "action": "resolve_contradiction",
+                "priority": "high",
+                "description": f"Resolve: {contradiction.reason[:50]}...",
+                "details": {
+                    "call": "exo_link_memories",
+                    "args": {
+                        "source_id": contradiction.memory_a_id,
+                        "target_id": contradiction.memory_b_id,
+                        "relation_type": "supersedes",  # or "contradicts"
+                        "reason": "Resolving detected contradiction",
+                    },
+                },
+            }
+        )
+
+    # Medium priority: review outdated knowledge
+    for outdated in report.outdated_knowledge[:3]:
+        next_actions.append(
+            {
+                "action": "review_outdated",
+                "priority": "medium",
+                "description": f"Review outdated: {outdated.reason[:50]}...",
+                "details": {
+                    "call": "exo_get_memory",
+                    "args": {"memory_id": outdated.memory_id},
+                },
+            }
+        )
+
+    # If issues found, suggest analyze_knowledge
+    if report.contradictions or report.outdated_knowledge:
+        next_actions.append(
+            {
+                "action": "full_analysis",
+                "priority": "low",
+                "description": "Run full health analysis after resolving issues",
+                "details": {"call": "exo_analyze_knowledge"},
+            }
+        )
+
     return {
         "success": True,
         **report.to_dict(),
+        "next_actions": next_actions,
     }
 
 

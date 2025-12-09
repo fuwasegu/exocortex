@@ -19,7 +19,9 @@ from .results import (
     ListMemoriesResult,
     MemoryStats,
     RecallMemoriesResult,
+    SessionBriefing,
     StoreMemoryResult,
+    SuggestedAction,
 )
 
 __all__ = [
@@ -47,4 +49,6 @@ __all__ = [
     "ListMemoriesResult",
     "MemoryStats",
     "AnalyzeKnowledgeResult",
+    "SessionBriefing",
+    "SuggestedAction",
 ]
