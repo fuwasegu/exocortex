@@ -121,9 +121,7 @@ class KnowledgeHealthAnalyzer:
         )
 
         # Generate suggestions
-        suggestions = self._generate_suggestions(
-            issues, total_memories, memory_stats
-        )
+        suggestions = self._generate_suggestions(issues, total_memories, memory_stats)
 
         return AnalyzeKnowledgeResult(
             total_memories=total_memories,
@@ -194,4 +192,3 @@ class KnowledgeHealthAnalyzer:
             suggestions.append("Don't forget to record failures too!")
 
         return suggestions
-

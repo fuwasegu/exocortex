@@ -272,4 +272,3 @@ class MemoryAnalyzer:
             reasons.append(f"from project '{existing_context}'")
 
         return "; ".join(reasons)
-

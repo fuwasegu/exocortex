@@ -243,4 +243,3 @@ class PatternConsolidator:
             pattern_parts.append(f"{i}. {summary}")
 
         return "\n".join(pattern_parts)
-

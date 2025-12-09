@@ -320,4 +320,3 @@ class MemoryService:
             min_cluster_size=min_cluster_size,
             similarity_threshold=similarity_threshold,
         )
-
