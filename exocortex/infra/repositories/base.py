@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 from ...domain.models import (
     MemoryLink,
@@ -25,6 +25,27 @@ if TYPE_CHECKING:
     import kuzu
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Type Guards for Database Manager
+# =============================================================================
+
+
+def _is_smart_manager(
+    manager: SmartDatabaseManager | DatabaseConnection,
+) -> TypeGuard[SmartDatabaseManager]:
+    """Type guard to check if manager is SmartDatabaseManager."""
+    return isinstance(manager, SmartDatabaseManager)
+
+
+def _is_legacy_connection(
+    manager: SmartDatabaseManager | DatabaseConnection,
+) -> TypeGuard[DatabaseConnection]:
+    """Type guard to check if manager is legacy DatabaseConnection."""
+    return isinstance(manager, DatabaseConnection) and not isinstance(
+        manager, SmartDatabaseManager
+    )
 
 
 class BaseRepositoryMixin:
@@ -64,9 +85,12 @@ class BaseRepositoryMixin:
 
     def _get_read_connection(self) -> DatabaseConnection:
         """Get a read-only database connection."""
-        if self._use_smart_manager:
-            return self._db_manager.read_connection  # type: ignore
-        return self._db_manager  # type: ignore
+        if _is_smart_manager(self._db_manager):
+            return self._db_manager.read_connection
+        if _is_legacy_connection(self._db_manager):
+            return self._db_manager
+        # Should never reach here, but satisfy type checker
+        raise TypeError(f"Unknown db_manager type: {type(self._db_manager)}")
 
     def _execute_read(
         self, query: str, parameters: dict | None = None
@@ -85,21 +109,22 @@ class BaseRepositoryMixin:
         For smart manager, this uses the write context with retry logic.
         Note: Call _release_write_lock() after completing all writes in a batch.
         """
-        if self._use_smart_manager:
-            write_conn = self._db_manager.get_write_connection()  # type: ignore
+        if _is_smart_manager(self._db_manager):
+            write_conn = self._db_manager.get_write_connection()
             if parameters:
                 return write_conn.execute(query, parameters=parameters)
             return write_conn.execute(query)
-        else:
+        if _is_legacy_connection(self._db_manager):
             # Legacy mode - use same connection
             if parameters:
-                return self._db_manager.execute(query, parameters=parameters)  # type: ignore
-            return self._db_manager.execute(query)  # type: ignore
+                return self._db_manager.execute(query, parameters=parameters)
+            return self._db_manager.execute(query)
+        raise TypeError(f"Unknown db_manager type: {type(self._db_manager)}")
 
     def _release_write_lock(self) -> None:
         """Release the write lock after completing write operations."""
-        if self._use_smart_manager:
-            self._db_manager.release_write_lock()  # type: ignore
+        if _is_smart_manager(self._db_manager):
+            self._db_manager.release_write_lock()
 
     # =========================================================================
     # Utilities
