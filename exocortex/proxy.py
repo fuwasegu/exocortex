@@ -19,6 +19,11 @@ from . import __version__
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Configuration & Path Functions
+# =============================================================================
+
+
 def get_server_version_file() -> Path:
     """Get the path to the server version file."""
     from .config import get_config
@@ -33,6 +38,11 @@ def get_server_pid_file() -> Path:
 
     config = get_config()
     return config.data_dir / "server.pid"
+
+
+# =============================================================================
+# Server Info Read/Write
+# =============================================================================
 
 
 def read_server_version() -> str | None:
@@ -57,6 +67,11 @@ def read_server_pid() -> int | None:
         except (ValueError, OSError):
             pass
     return None
+
+
+# =============================================================================
+# Process Verification
+# =============================================================================
 
 
 def is_exocortex_process(pid: int, port: int = 8765) -> bool:
@@ -157,6 +172,11 @@ def cleanup_server_files() -> None:
     for f in [get_server_version_file(), get_server_pid_file()]:
         with contextlib.suppress(Exception):
             f.unlink(missing_ok=True)
+
+
+# =============================================================================
+# Process Management
+# =============================================================================
 
 
 def find_pid_on_port(port: int) -> int | None:
@@ -264,6 +284,11 @@ def kill_old_server(port: int = 8765) -> bool:
     except Exception as e:
         logger.error(f"Error killing old server: {e}")
         return False
+
+
+# =============================================================================
+# Server Lifecycle
+# =============================================================================
 
 
 def check_version_and_restart_if_needed(host: str, port: int) -> bool | None:
@@ -389,6 +414,11 @@ def start_background_server(host: str, port: int) -> subprocess.Popen | None:
     except Exception as e:
         logger.error(f"Failed to start background server: {e}")
         return None
+
+
+# =============================================================================
+# Proxy Class
+# =============================================================================
 
 
 class StdioToSSEProxy:
@@ -556,6 +586,11 @@ class StdioToSSEProxy:
         else:
             logger.warning(f"Unknown method: {method}")
             raise ValueError(f"Method not found: {method}")
+
+
+# =============================================================================
+# Entry Points
+# =============================================================================
 
 
 def run_proxy(host: str, port: int) -> None:

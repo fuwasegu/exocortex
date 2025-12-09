@@ -14,15 +14,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Constants
+# =============================================================================
+
 # Default retry settings for write operations
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 0.5  # seconds
+
+
+# =============================================================================
+# Exceptions
+# =============================================================================
 
 
 class DatabaseLockError(Exception):
     """Raised when database is locked and cannot be accessed."""
 
     pass
+
+
+# =============================================================================
+# Database Connection
+# =============================================================================
 
 
 class DatabaseConnection:
@@ -307,6 +322,11 @@ class DatabaseConnection:
             self._db = None
         mode = "read-only" if self._read_only else "read-write"
         logger.info(f"Database connection closed ({mode})")
+
+
+# =============================================================================
+# Smart Database Manager
+# =============================================================================
 
 
 class SmartDatabaseManager:
