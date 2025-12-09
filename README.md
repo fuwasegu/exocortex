@@ -192,6 +192,7 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_explore_related` | Discover related memories via graph traversal |
 | `exo_get_memory_links` | Get all outgoing links from a memory |
 | `exo_trace_lineage` | 🕰️ Trace the evolution/lineage of a memory (temporal reasoning) |
+| `exo_curiosity_scan` | 🤔 Scan for contradictions, outdated info, and knowledge gaps |
 | `exo_analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
 | `exo_sleep` | Trigger background consolidation (deduplication, orphan rescue) |
 | `exo_consolidate` | Extract abstract patterns from memory clusters |
@@ -334,6 +335,49 @@ Result: Shows the evolution chain of how the current decision came to be
 - 🔍 **Architecture archaeology**: "Why did we choose this approach?"
 - 🐛 **Root cause analysis**: "What led to this bug?"
 - 📚 **Knowledge evolution**: "How has our understanding changed?"
+
+### Curiosity Engine with `exo_curiosity_scan`
+
+The Curiosity Engine actively **questions your knowledge base** like a curious human would. It scans for inconsistencies and generates questions to improve knowledge quality.
+
+**What it detects:**
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| 🔴 **Contradictions** | Memories that conflict with each other | Success vs Failure on same topic |
+| 📅 **Outdated Info** | Old knowledge that may need review | Memories superseded but not linked |
+| ❓ **Questions** | Human-like questions about your knowledge | "Is this still valid?" |
+
+**Example Output:**
+
+```json
+{
+  "contradictions": [
+    {
+      "memory_a_summary": "Caching approach works perfectly",
+      "memory_b_summary": "Caching approach failed badly",
+      "reason": "success vs failure on same topic",
+      "confidence": 0.85
+    }
+  ],
+  "outdated_knowledge": [],
+  "questions": [
+    "🤔 These memories seem to contradict. Are both still valid?"
+  ]
+}
+```
+
+**Usage:**
+```
+AI: exo_curiosity_scan(context_filter="my-project")
+    ↓
+Result: Report of potential issues and questions to investigate
+```
+
+**Use Cases:**
+- 🔍 **Knowledge audit**: "Are there any contradictions in my knowledge?"
+- 🧹 **Quality maintenance**: "What needs to be cleaned up?"
+- 💡 **Discovery**: "What questions should I be asking about my knowledge?"
 
 ## Environment Variables
 

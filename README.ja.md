@@ -192,6 +192,7 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_explore_related` | グラフ探索で関連記憶を発見 |
 | `exo_get_memory_links` | 記憶のリンク一覧を取得 |
 | `exo_trace_lineage` | 🕰️ 記憶の系譜・進化を追跡（時系列推論） |
+| `exo_curiosity_scan` | 🤔 矛盾・古い情報・知識のギャップをスキャン |
 | `exo_analyze_knowledge` | 知識ベースの健全性分析と改善提案 |
 | `exo_sleep` | バックグラウンド整理（重複検出、孤立記憶のレスキュー）を起動 |
 | `exo_consolidate` | 記憶クラスタから抽象パターンを抽出 |
@@ -334,6 +335,49 @@ AI: exo_trace_lineage(memory_id="現在の判断", direction="backward")
 - 🔍 **アーキテクチャ考古学**: 「なぜこのアプローチを選んだ？」
 - 🐛 **根本原因分析**: 「このバグの原因は何？」
 - 📚 **知識の進化**: 「理解がどう変わってきた？」
+
+### Curiosity Engine `exo_curiosity_scan`
+
+Curiosity Engineは、好奇心旺盛な人間のように**知識ベースに疑問を投げかけます**。矛盾や不整合をスキャンし、知識の質を向上させるための質問を生成します。
+
+**検出する内容：**
+
+| カテゴリ | 説明 | 例 |
+|---------|------|-----|
+| 🔴 **矛盾** | 互いに矛盾する記憶 | 同じトピックで成功 vs 失敗 |
+| 📅 **古い情報** | 見直しが必要な古い知識 | supersededされたが未リンク |
+| ❓ **質問** | 知識に関する人間的な質問 | 「これはまだ有効？」 |
+
+**出力例：**
+
+```json
+{
+  "contradictions": [
+    {
+      "memory_a_summary": "キャッシュのアプローチは完璧に機能した",
+      "memory_b_summary": "キャッシュのアプローチは完全に失敗した",
+      "reason": "同じトピックで成功 vs 失敗",
+      "confidence": 0.85
+    }
+  ],
+  "outdated_knowledge": [],
+  "questions": [
+    "🤔 これらの記憶は矛盾しているようです。両方とも有効ですか？"
+  ]
+}
+```
+
+**使い方：**
+```
+AI: exo_curiosity_scan(context_filter="my-project")
+    ↓
+結果: 潜在的な問題と調査すべき質問のレポート
+```
+
+**ユースケース：**
+- 🔍 **知識の監査**: 「知識に矛盾はない？」
+- 🧹 **品質メンテナンス**: 「何をクリーンアップすべき？」
+- 💡 **発見**: 「知識について何を問うべき？」
 
 ## 環境変数
 
