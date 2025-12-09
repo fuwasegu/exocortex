@@ -21,4 +21,3 @@ class RelationType(str, Enum):
     CONTRADICTS = "contradicts"  # This memory contradicts the target
     EXTENDS = "extends"  # This memory extends/elaborates the target
     DEPENDS_ON = "depends_on"  # This memory depends on the target
-

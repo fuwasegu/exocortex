@@ -19,4 +19,3 @@ class Tag(BaseModel):
 
     name: str = Field(..., description="Tag name (primary key)")
     created_at: datetime = Field(..., description="Creation timestamp")
-

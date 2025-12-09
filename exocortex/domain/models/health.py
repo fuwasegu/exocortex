@@ -48,4 +48,3 @@ class KnowledgeHealthIssue(BaseModel):
         default_factory=list, description="Affected memory IDs"
     )
     suggested_action: str = Field(..., description="Suggested action to resolve")
-

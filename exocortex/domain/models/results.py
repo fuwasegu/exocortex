@@ -63,4 +63,3 @@ class AnalyzeKnowledgeResult(BaseModel):
     stats: dict[str, Any] = Field(
         default_factory=dict, description="Additional statistics"
     )
-

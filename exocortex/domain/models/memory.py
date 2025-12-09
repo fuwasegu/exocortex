@@ -70,4 +70,3 @@ class MemoryWithContext(Memory):
     related_memories: list[MemoryLink] = Field(
         default_factory=list, description="Related memories"
     )
-
