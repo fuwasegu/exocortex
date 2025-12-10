@@ -358,9 +358,9 @@ class TestDreamWorkerBackup:
 
     def test_backup_limits_to_max_backups(self):
         """Test backup keeps only max_backups most recent."""
+
         from exocortex.config import Config
         from exocortex.worker.dream import DreamWorker
-        import time
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = Config(data_dir=Path(tmpdir))
