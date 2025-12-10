@@ -123,6 +123,66 @@ class DreamWorker:
         """
         return self._kuzu_lock_path.exists()
 
+    def _backup_database(self, max_backups: int = 3) -> bool:
+        """Create a backup of the database before consolidation.
+
+        Creates timestamped backups in ~/.exocortex/backups/ and maintains
+        only the most recent N backups to save disk space.
+
+        Args:
+            max_backups: Maximum number of backups to keep.
+
+        Returns:
+            True if backup was successful, False otherwise.
+        """
+        import shutil
+        from datetime import datetime
+
+        db_path = self.config.data_dir / self.config.db_name
+        if not db_path.exists():
+            logger.info("No database found, skipping backup")
+            return True
+
+        backup_dir = self.config.data_dir / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create timestamped backup
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{self.config.db_name}_{timestamp}"
+        backup_path = backup_dir / backup_name
+
+        try:
+            # Copy database (works for both file and directory)
+            if db_path.is_dir():
+                shutil.copytree(db_path, backup_path)
+            else:
+                shutil.copy2(db_path, backup_path)
+
+            logger.info(f"💾 Database backup created: {backup_path.name}")
+
+            # Cleanup old backups (keep only max_backups most recent)
+            backups = sorted(
+                backup_dir.glob(f"{self.config.db_name}_*"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+
+            for old_backup in backups[max_backups:]:
+                try:
+                    if old_backup.is_dir():
+                        shutil.rmtree(old_backup)
+                    else:
+                        old_backup.unlink()
+                    logger.info(f"🗑️  Removed old backup: {old_backup.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove old backup {old_backup}: {e}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Backup failed: {e}")
+            return False
+
     def run(self) -> None:
         """Main entry point for the dream worker.
 
@@ -168,6 +228,12 @@ class DreamWorker:
                 logger.info("Lock acquired, starting consolidation...")
                 self._running = True
                 start_time = time.time()
+
+                # Create backup before any modifications
+                if not self._backup_database():
+                    logger.warning(
+                        "Backup failed, but continuing with consolidation..."
+                    )
 
                 self._run_consolidation_tasks()
 
