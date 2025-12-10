@@ -130,7 +130,7 @@ class DreamWorker:
         If lock cannot be acquired, exits gracefully.
 
         Safety checks:
-        1. Warns if SSE server appears to be running
+        1. BLOCKS if SSE server is running (to prevent DB corruption)
         2. Checks KùzuDB's internal lock file
         3. Uses file lock for worker-to-worker coordination
         """
@@ -138,14 +138,17 @@ class DreamWorker:
         logger.info(f"Data directory: {self.config.data_dir}")
         logger.info(f"Lock file: {self.lock_path}")
 
-        # Safety check 1: Warn about SSE server
+        # Safety check 1: BLOCK if SSE server is running
+        # KùzuDB does not support concurrent access from multiple processes
         if self.check_server and self._is_sse_server_likely_running():
-            logger.warning(
-                "⚠️  SSE server may be running. "
-                "Database access conflicts are possible. "
-                "Consider running when server is idle or stopped."
+            logger.error(
+                "❌ SSE server is running on port 8765. "
+                "KùzuDB does not support concurrent access from multiple processes. "
+                "Running Dream Worker while SSE server is active can corrupt the database. "
+                "Please stop the SSE server first, or disable exo_sleep in proxy mode."
             )
-            # Continue anyway, but with warning logged
+            logger.info("Dream worker aborted to prevent database corruption.")
+            return  # Exit without running
 
         # Safety check 2: Check KùzuDB internal lock
         if self._is_kuzu_locked():
