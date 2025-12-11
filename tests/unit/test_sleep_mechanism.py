@@ -313,3 +313,91 @@ class TestDreamWorkerSignalHandling:
             worker._handle_signal(15, None)  # SIGTERM
 
             assert worker._running is False
+
+
+class TestDreamWorkerBackup:
+    """Tests for DreamWorker backup functionality."""
+
+    def test_backup_creates_backup_directory(self):
+        """Test backup creates backups directory if not exists."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+
+            # Create a dummy database file
+            db_path = Path(tmpdir) / config.db_name
+            db_path.write_text("dummy db content")
+
+            result = worker._backup_database()
+
+            assert result is True
+            backup_dir = Path(tmpdir) / "backups"
+            assert backup_dir.exists()
+
+    def test_backup_creates_timestamped_backup(self):
+        """Test backup creates a timestamped backup file."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+
+            # Create a dummy database file
+            db_path = Path(tmpdir) / config.db_name
+            db_path.write_text("dummy db content")
+
+            worker._backup_database()
+
+            backup_dir = Path(tmpdir) / "backups"
+            backups = list(backup_dir.glob(f"{config.db_name}_*"))
+            assert len(backups) == 1
+
+    def test_backup_limits_to_max_backups(self):
+        """Test backup keeps only max_backups most recent."""
+
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+
+            # Create a dummy database file
+            db_path = Path(tmpdir) / config.db_name
+            db_path.write_text("dummy db content")
+
+            # Pre-create old backups manually with different timestamps
+            backup_dir = Path(tmpdir) / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+
+            for i in range(4):
+                old_backup = backup_dir / f"{config.db_name}_2024010{i}_120000"
+                old_backup.write_text("old backup")
+                # Set different modification times
+                import os
+
+                os.utime(old_backup, (1000000 + i * 1000, 1000000 + i * 1000))
+
+            # Now create a new backup with max_backups=3
+            worker._backup_database(max_backups=3)
+
+            backups = list(backup_dir.glob(f"{config.db_name}_*"))
+            assert len(backups) == 3
+
+    def test_backup_returns_true_when_no_database(self):
+        """Test backup returns True when database doesn't exist."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+
+            # No database file created
+            result = worker._backup_database()
+
+            assert result is True
