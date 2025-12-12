@@ -361,7 +361,12 @@ const TYPE_COLORS = {
 };
 
 function renderGraph() {
-    const container = elements.graphNetwork;
+    const container = document.getElementById('graph-network');
+    if (!container) {
+        console.warn('Graph container not found');
+        return;
+    }
+    
     const { nodes, edges } = state.graph;
     
     if (nodes.length === 0) {
