@@ -4,4 +4,4 @@ A local MCP server that acts as a developer's second brain,
 storing and retrieving development insights across projects.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
