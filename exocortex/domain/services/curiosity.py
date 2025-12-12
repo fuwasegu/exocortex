@@ -592,7 +592,7 @@ class CuriosityEngine:
         # Group memories by tags
         tag_to_memories: dict[str, list] = {}
         for mem in memories:
-            for tag in (mem.tags or []):
+            for tag in mem.tags or []:
                 if tag not in tag_to_memories:
                     tag_to_memories[tag] = []
                 tag_to_memories[tag].append(mem)
@@ -602,7 +602,7 @@ class CuriosityEngine:
             if len(suggested) >= max_findings:
                 break
 
-            for mem_b in memories[i + 1:]:
+            for mem_b in memories[i + 1 :]:
                 if len(suggested) >= max_findings:
                     break
 
@@ -656,7 +656,7 @@ class CuriosityEngine:
                 if len(suggested) >= max_findings:
                     break
 
-                for mem_b in ctx_memories[i + 1:]:
+                for mem_b in ctx_memories[i + 1 :]:
                     if len(suggested) >= max_findings:
                         break
 
@@ -668,14 +668,22 @@ class CuriosityEngine:
                     type_a = str(mem_a.memory_type).lower() if mem_a.memory_type else ""
                     type_b = str(mem_b.memory_type).lower() if mem_b.memory_type else ""
 
-                    if type_a == type_b and type_a in ["insight", "decision", "success"]:
+                    if type_a == type_b and type_a in [
+                        "insight",
+                        "decision",
+                        "success",
+                    ]:
                         checked_pairs.add(pair)
                         suggested.append(
                             SuggestedLink(
                                 source_id=mem_a.id,
-                                source_summary=mem_a.summary[:80] if mem_a.summary else "",
+                                source_summary=mem_a.summary[:80]
+                                if mem_a.summary
+                                else "",
                                 target_id=mem_b.id,
-                                target_summary=mem_b.summary[:80] if mem_b.summary else "",
+                                target_summary=mem_b.summary[:80]
+                                if mem_b.summary
+                                else "",
                                 reason=f"Same context '{ctx}' and type '{type_a}'",
                                 link_type="context_shared",
                                 confidence=0.6,
@@ -734,7 +742,9 @@ class CuriosityEngine:
                             source_id=mem.id,
                             source_summary=mem.summary[:80] if mem.summary else "",
                             target_id=similar.id,
-                            target_summary=similar.summary[:80] if similar.summary else "",
+                            target_summary=similar.summary[:80]
+                            if similar.summary
+                            else "",
                             reason=f"High semantic similarity ({similarity:.0%})",
                             link_type="semantic_similar",
                             confidence=similarity,

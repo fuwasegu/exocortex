@@ -194,7 +194,7 @@ uv run --directory /path/to/exocortex exocortex --transport sse --port 8765
 | `exo_trace_lineage` | 🕰️ Trace the evolution/lineage of a memory (temporal reasoning) |
 | `exo_curiosity_scan` | 🤔 Scan for contradictions, outdated info, and knowledge gaps |
 | `exo_analyze_knowledge` | Analyze knowledge base health and get improvement suggestions |
-| `exo_sleep` | Trigger background consolidation (deduplication, orphan rescue) |
+| `exo_sleep` | Trigger background consolidation (deduplication, orphan rescue, auto-linking) |
 | `exo_consolidate` | Extract abstract patterns from memory clusters |
 
 ### 🤖 Knowledge Autonomy
@@ -338,7 +338,7 @@ Result: Shows the evolution chain of how the current decision came to be
 
 ### Curiosity Engine with `exo_curiosity_scan`
 
-The Curiosity Engine actively **questions your knowledge base** like a curious human would. It scans for inconsistencies and generates questions to improve knowledge quality.
+The Curiosity Engine actively **questions your knowledge base** like a curious human would. It scans for inconsistencies, finds unlinked memories, and generates questions to improve knowledge quality.
 
 **What it detects:**
 
@@ -346,7 +346,16 @@ The Curiosity Engine actively **questions your knowledge base** like a curious h
 |----------|-------------|---------|
 | 🔴 **Contradictions** | Memories that conflict with each other | Success vs Failure on same topic |
 | 📅 **Outdated Info** | Old knowledge that may need review | Memories superseded but not linked |
+| 🔗 **Suggested Links** | Unlinked memories that should be connected | Memories sharing tags, context, or high similarity |
 | ❓ **Questions** | Human-like questions about your knowledge | "Is this still valid?" |
+
+**Suggested Links Detection Strategies:**
+
+| Strategy | Confidence | Description |
+|----------|------------|-------------|
+| **Tag Sharing** | High (0.7+) | Memories sharing 2+ tags are likely related |
+| **Context Sharing** | Medium (0.6) | Same project + same type (insight/decision) |
+| **Semantic Similarity** | High (0.7+) | High vector similarity (>70%) but not linked |
 
 **Example Output:**
 
@@ -360,9 +369,34 @@ The Curiosity Engine actively **questions your knowledge base** like a curious h
       "confidence": 0.85
     }
   ],
+  "suggested_links": [
+    {
+      "source_summary": "Database optimization technique",
+      "target_summary": "Query performance improvement",
+      "reason": "Share 3 tags: database, performance, optimization",
+      "link_type": "tag_shared",
+      "confidence": 0.8,
+      "suggested_relation": "related"
+    }
+  ],
   "outdated_knowledge": [],
   "questions": [
-    "🤔 These memories seem to contradict. Are both still valid?"
+    "🤔 These memories seem to contradict. Are both still valid?",
+    "🔗 Found unlinked related memories. Link them to strengthen the graph?"
+  ],
+  "next_actions": [
+    {
+      "action": "create_link",
+      "priority": "medium",
+      "details": {
+        "call": "exo_link_memories",
+        "args": {
+          "source_id": "...",
+          "target_id": "...",
+          "relation_type": "related"
+        }
+      }
+    }
   ]
 }
 ```
@@ -371,11 +405,16 @@ The Curiosity Engine actively **questions your knowledge base** like a curious h
 ```
 AI: exo_curiosity_scan(context_filter="my-project")
     ↓
-Result: Report of potential issues and questions to investigate
+Result: Report of issues, suggested links, and questions
+    ↓
+AI: Executes next_actions to create links
+    ↓
+Result: Knowledge graph becomes richer and more connected!
 ```
 
 **Use Cases:**
 - 🔍 **Knowledge audit**: "Are there any contradictions in my knowledge?"
+- 🔗 **Graph enrichment**: "Find unlinked memories that should be connected"
 - 🧹 **Quality maintenance**: "What needs to be cleaned up?"
 - 💡 **Discovery**: "What questions should I be asking about my knowledge?"
 
@@ -553,13 +592,17 @@ Like human sleep consolidates memories, Exocortex has a **background consolidati
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ 1. Deduplication                                      │   │
 │  │    - Find memories with similarity >= 95%             │   │
-│  │    - Link newer → older with 'supersedes' relation    │   │
+│  │    - Link newer → older with 'related' relation       │   │
 │  ├──────────────────────────────────────────────────────┤   │
 │  │ 2. Orphan Rescue                                      │   │
 │  │    - Find memories with no tags and no links          │   │
 │  │    - Link to most similar memory with 'related'       │   │
 │  ├──────────────────────────────────────────────────────┤   │
-│  │ 3. Pattern Mining (Phase 2)                           │   │
+│  │ 3. Auto-linking (High Confidence Only)                │   │
+│  │    - Tag sharing: 3+ shared tags → 'related'          │   │
+│  │    - Semantic: 80%+ similarity → 'related'            │   │
+│  ├──────────────────────────────────────────────────────┤   │
+│  │ 4. Pattern Mining (Phase 2)                           │   │
 │  │    - Extract common patterns from memory clusters     │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘

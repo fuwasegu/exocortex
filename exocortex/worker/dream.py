@@ -5,7 +5,8 @@ to organize and consolidate the knowledge graph. It performs:
 
 1. Deduplication: Detect and link highly similar memories
 2. Orphan Rescue: Find and link isolated memories
-3. Pattern Mining: Extract patterns from frequently accessed topics (Phase 2)
+3. Auto-linking: Connect unlinked but related memories (high confidence only)
+4. Pattern Mining: Extract patterns from frequently accessed topics (Phase 2)
 
 The worker is designed to run as a detached process, acquiring a file lock
 to ensure exclusive database access when the user is not actively working.
@@ -270,8 +271,15 @@ class DreamWorker:
         if not self._running:
             return
 
-        # Task 3: Pattern Mining (Phase 2 - placeholder)
-        logger.info("Task 3: Pattern mining (placeholder for Phase 2)...")
+        # Task 3: Auto-linking (high confidence only)
+        logger.info("Task 3: Auto-linking related memories...")
+        self._task_auto_linking(container)
+
+        if not self._running:
+            return
+
+        # Task 4: Pattern Mining (Phase 2 - placeholder)
+        logger.info("Task 4: Pattern mining (placeholder for Phase 2)...")
         # self._task_pattern_mining(container)
 
     def _task_deduplication(self, container: Container) -> None:
@@ -412,6 +420,159 @@ class DreamWorker:
 
         except Exception as e:
             logger.warning(f"Orphan rescue task error: {e}")
+
+    def _task_auto_linking(self, container: Container) -> None:
+        """Automatically link related memories with high confidence.
+
+        Uses two strategies (high confidence only to avoid noise):
+        1. Tag sharing: Memories with 3+ shared tags
+        2. Semantic similarity: Memories with >= 80% similarity
+
+        Only creates links between memories that aren't already linked.
+        """
+        repo = container.repository
+        service = container.memory_service
+
+        try:
+            # Get all memories
+            memories, total, _ = repo.list_memories(limit=500)
+            logger.info(f"Checking {total} memories for auto-linking opportunities...")
+
+            # Get existing links to avoid duplicates
+            existing_links: set[tuple[str, str]] = set()
+            for mem in memories:
+                links = repo.get_links(mem.id)
+                for link in links:
+                    pair = tuple(sorted([mem.id, link.target_id]))
+                    existing_links.add(pair)
+
+            links_created = 0
+            processed_pairs: set[tuple[str, str]] = set()
+
+            # Strategy 1: Tag sharing (3+ shared tags)
+            logger.info("Strategy 1: Checking tag sharing...")
+            tag_links = self._find_tag_shared_pairs(
+                memories, existing_links, processed_pairs
+            )
+            for source_id, target_id, shared_tags in tag_links:
+                if not self._running:
+                    break
+                try:
+                    service.link_memories(
+                        source_id=source_id,
+                        target_id=target_id,
+                        relation_type=RelationType.RELATED,
+                        reason=f"Auto-linked: Share {len(shared_tags)} tags ({', '.join(list(shared_tags)[:3])})",
+                    )
+                    links_created += 1
+                    logger.info(
+                        f"Linked (tags): {source_id[:8]}... ↔ {target_id[:8]}... "
+                        f"(shared: {', '.join(list(shared_tags)[:3])})"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not create tag-based link: {e}")
+
+            # Strategy 2: Semantic similarity (80%+)
+            if self._running:
+                logger.info("Strategy 2: Checking semantic similarity...")
+                semantic_links = self._find_semantic_pairs(
+                    memories, existing_links, processed_pairs, repo
+                )
+                for source_id, target_id, similarity in semantic_links:
+                    if not self._running:
+                        break
+                    try:
+                        service.link_memories(
+                            source_id=source_id,
+                            target_id=target_id,
+                            relation_type=RelationType.RELATED,
+                            reason=f"Auto-linked: High semantic similarity ({similarity:.0%})",
+                        )
+                        links_created += 1
+                        logger.info(
+                            f"Linked (semantic): {source_id[:8]}... ↔ {target_id[:8]}... "
+                            f"(similarity: {similarity:.0%})"
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not create semantic link: {e}")
+
+            logger.info(f"Auto-linking complete: {links_created} links created")
+
+        except Exception as e:
+            logger.warning(f"Auto-linking task error: {e}")
+
+    def _find_tag_shared_pairs(
+        self,
+        memories: list,
+        existing_links: set[tuple[str, str]],
+        processed_pairs: set[tuple[str, str]],
+        min_shared_tags: int = 3,
+    ) -> list[tuple[str, str, set[str]]]:
+        """Find memory pairs with 3+ shared tags.
+
+        Returns list of (source_id, target_id, shared_tags) tuples.
+        """
+        results: list[tuple[str, str, set[str]]] = []
+
+        for i, mem_a in enumerate(memories):
+            if not self._running:
+                break
+
+            for mem_b in memories[i + 1 :]:
+                pair = tuple(sorted([mem_a.id, mem_b.id]))
+                if pair in existing_links or pair in processed_pairs:
+                    continue
+
+                shared_tags = set(mem_a.tags or []) & set(mem_b.tags or [])
+                if len(shared_tags) >= min_shared_tags:
+                    processed_pairs.add(pair)
+                    results.append((mem_a.id, mem_b.id, shared_tags))
+
+        return results
+
+    def _find_semantic_pairs(
+        self,
+        memories: list,
+        existing_links: set[tuple[str, str]],
+        processed_pairs: set[tuple[str, str]],
+        repo,
+        min_similarity: float = 0.80,
+        sample_size: int = 50,
+    ) -> list[tuple[str, str, float]]:
+        """Find memory pairs with high semantic similarity.
+
+        Returns list of (source_id, target_id, similarity) tuples.
+        """
+        results: list[tuple[str, str, float]] = []
+
+        # Sample memories to avoid too many embedding queries
+        sample = memories[:sample_size]
+
+        for mem in sample:
+            if not self._running:
+                break
+
+            try:
+                similar = repo.search_similar_by_embedding(
+                    embedding=repo._embedding_engine.embed(mem.content),
+                    limit=5,
+                    exclude_id=mem.id,
+                )
+            except Exception:
+                continue
+
+            for other_id, _, similarity, _, _ in similar:
+                if similarity < min_similarity:
+                    continue
+
+                pair = tuple(sorted([mem.id, other_id]))
+                if pair in existing_links or pair in processed_pairs:
+                    continue
+
+                processed_pairs.add(pair)
+                results.append((mem.id, other_id, similarity))
+
+        return results
 
     def _cleanup(self) -> None:
         """Clean up resources."""

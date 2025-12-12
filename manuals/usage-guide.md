@@ -164,7 +164,7 @@ Trace the **evolution and history** of a memory. Understand how decisions evolve
 
 ### 🤔 Curiosity Scan (`exo_curiosity_scan`)
 
-Scan your knowledge base for contradictions, outdated info, and generate questions.
+Scan your knowledge base for contradictions, suggested links, outdated info, and generate questions.
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
@@ -174,13 +174,43 @@ Scan your knowledge base for contradictions, outdated info, and generate questio
 
 **What it detects:**
 - 🔴 **Contradictions**: Success vs Failure on same topic
+- 🔗 **Suggested Links**: Unlinked memories that should be connected
 - 📅 **Outdated Info**: Old knowledge not marked as superseded
 - ❓ **Questions**: Human-like questions about your knowledge
 
+**Suggested Link Detection Strategies:**
+
+| Strategy | Description |
+|----------|-------------|
+| **Tag Sharing** | Memories sharing 2+ tags (high confidence) |
+| **Context Sharing** | Same project + same type (medium confidence) |
+| **Semantic Similarity** | High vector similarity >70% (high confidence) |
+
 **Example Prompts:**
 - "Are there any contradictions in my knowledge?"
+- "Find unlinked memories that should be connected"
 - "Question my assumptions about the database design"
 - "Scan for inconsistencies in my project"
+
+**Automated Link Creation:**
+
+The response includes `next_actions` with suggested `exo_link_memories` calls:
+
+```json
+{
+  "suggested_links": [...],
+  "next_actions": [
+    {
+      "action": "create_link",
+      "priority": "medium",
+      "details": {
+        "call": "exo_link_memories",
+        "args": { "source_id": "...", "target_id": "...", "relation_type": "related" }
+      }
+    }
+  ]
+}
+```
 
 **🤖 Optional: BERT-based Sentiment Analysis**
 
@@ -323,10 +353,21 @@ Diagnose knowledge base health.
 ```
 💬 "Are there any issues with my knowledge base?"
 
-1. exo_curiosity_scan to detect contradictions and outdated info
+1. exo_curiosity_scan to detect contradictions, suggested links, and outdated info
 2. Review the generated questions
-3. Link contradicting memories with evolved_from or supersedes
-4. Mark outdated memories as superseded
+3. Execute next_actions to create suggested links
+4. Link contradicting memories with evolved_from or supersedes
+5. Mark outdated memories as superseded
+```
+
+### 🔗 Graph Enrichment Flow
+
+```
+💬 "Find unlinked memories and connect them"
+
+1. exo_curiosity_scan → Returns suggested_links
+2. AI executes next_actions (exo_link_memories calls)
+3. Knowledge graph becomes richer and more interconnected
 ```
 
 **Example:**
