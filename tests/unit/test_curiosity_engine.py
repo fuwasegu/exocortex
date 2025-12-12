@@ -298,7 +298,7 @@ class TestCuriosityEngineSuggestedLinks:
         mem_a.summary = "API design decision"
         mem_a.content = "Use REST for public API"
         mem_a.memory_type = "decision"
-        mem_a.context_name = "backend-project"
+        mem_a.context = "backend-project"
         mem_a.tags = ["api"]
 
         mem_b = MagicMock()
@@ -306,7 +306,7 @@ class TestCuriosityEngineSuggestedLinks:
         mem_b.summary = "Authentication decision"
         mem_b.content = "Use JWT tokens"
         mem_b.memory_type = "decision"
-        mem_b.context_name = "backend-project"
+        mem_b.context = "backend-project"
         mem_b.tags = ["auth"]
 
         return [mem_a, mem_b]
