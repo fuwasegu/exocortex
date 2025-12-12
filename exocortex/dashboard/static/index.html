@@ -8,6 +8,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
+    <!-- vis-network for graph visualization -->
+    <link href="https://unpkg.com/vis-network@9.1.9/dist/dist/vis-network.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.js"></script>
 </head>
 <body>
     <div class="app">
@@ -139,10 +142,23 @@
             <section class="tab-content" id="tab-graph">
                 <div class="graph-header">
                     <h2>🕸️ Knowledge Graph</h2>
-                    <p class="graph-hint">Connections between your memories</p>
+                    <p class="graph-hint">Connections between your memories — Scroll to zoom, drag to pan</p>
+                </div>
+                <div class="graph-controls">
+                    <button class="graph-btn" id="graph-zoom-in" title="Zoom In">🔍+</button>
+                    <button class="graph-btn" id="graph-zoom-out" title="Zoom Out">🔍−</button>
+                    <button class="graph-btn" id="graph-fit" title="Fit to View">⊡</button>
+                    <button class="graph-btn" id="graph-physics" title="Toggle Physics">⚛️</button>
                 </div>
                 <div class="graph-container" id="graph-container">
-                    <canvas id="graph-canvas"></canvas>
+                    <div id="graph-network"></div>
+                </div>
+                <div class="graph-legend">
+                    <span class="legend-item"><span class="legend-dot insight"></span>Insight</span>
+                    <span class="legend-item"><span class="legend-dot success"></span>Success</span>
+                    <span class="legend-item"><span class="legend-dot failure"></span>Failure</span>
+                    <span class="legend-item"><span class="legend-dot decision"></span>Decision</span>
+                    <span class="legend-item"><span class="legend-dot note"></span>Note</span>
                 </div>
             </section>
         </main>

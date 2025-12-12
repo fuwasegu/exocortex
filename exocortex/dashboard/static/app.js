@@ -28,8 +28,12 @@ const elements = {
     filterType: document.getElementById('filter-type'),
     filterContext: document.getElementById('filter-context'),
     searchInput: document.getElementById('memory-search'),
-    graphCanvas: document.getElementById('graph-canvas'),
+    graphNetwork: document.getElementById('graph-network'),
 };
+
+// Graph state
+let networkInstance = null;
+let physicsEnabled = true;
 
 // Type icons
 const TYPE_ICONS = {
@@ -348,87 +352,211 @@ function appendLogEntry(content) {
 
 // ============ Graph Visualization ============
 
+const TYPE_COLORS = {
+    insight: '#00ffff',
+    success: '#00ff88',
+    failure: '#ff4757',
+    decision: '#ff9500',
+    note: '#8b949e',
+};
+
 function renderGraph() {
-    const canvas = elements.graphCanvas;
-    const ctx = canvas.getContext('2d');
-    const container = document.getElementById('graph-container');
-    
-    // Set canvas size
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    
+    const container = elements.graphNetwork;
     const { nodes, edges } = state.graph;
     
     if (nodes.length === 0) {
-        ctx.fillStyle = '#8b949e';
-        ctx.font = '16px Outfit';
-        ctx.textAlign = 'center';
-        ctx.fillText('No graph data available', canvas.width / 2, canvas.height / 2);
+        container.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #8b949e; font-size: 16px;">No graph data available</div>';
         return;
     }
     
-    // Simple force-directed layout
-    const positions = {};
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const radius = Math.min(canvas.width, canvas.height) * 0.35;
-    
-    // Initial positions in a circle
-    nodes.forEach((node, i) => {
-        const angle = (i / nodes.length) * Math.PI * 2;
-        positions[node.id] = {
-            x: centerX + Math.cos(angle) * radius,
-            y: centerY + Math.sin(angle) * radius,
+    // Prepare vis.js data
+    const visNodes = new vis.DataSet(nodes.map(node => {
+        const color = TYPE_COLORS[node.type] || TYPE_COLORS.note;
+        return {
+            id: node.id,
+            label: node.label.length > 25 ? node.label.substring(0, 25) + '...' : node.label,
+            title: `<div style="padding: 8px; max-width: 300px;"><strong>${TYPE_ICONS[node.type] || '📝'} ${node.type}</strong><br/>${node.label}</div>`,
+            color: {
+                background: color,
+                border: color,
+                highlight: {
+                    background: color,
+                    border: '#ffffff',
+                },
+                hover: {
+                    background: color,
+                    border: '#ffffff',
+                },
+            },
+            font: {
+                color: '#e6edf3',
+                size: 12,
+                face: 'JetBrains Mono, monospace',
+            },
+            borderWidth: 2,
+            shadow: {
+                enabled: true,
+                color: color,
+                size: 15,
+                x: 0,
+                y: 0,
+            },
+            size: 18,
         };
-    });
+    }));
     
-    // Draw edges
-    ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
-    ctx.lineWidth = 1;
+    const visEdges = new vis.DataSet(edges.map((edge, idx) => ({
+        id: idx,
+        from: edge.source,
+        to: edge.target,
+        title: edge.relation_type || 'related',
+        color: {
+            color: 'rgba(0, 255, 255, 0.3)',
+            highlight: 'rgba(0, 255, 255, 0.8)',
+            hover: 'rgba(0, 255, 255, 0.6)',
+        },
+        width: 1.5,
+        smooth: {
+            enabled: true,
+            type: 'continuous',
+            roundness: 0.5,
+        },
+        arrows: {
+            to: {
+                enabled: edge.relation_type && edge.relation_type !== 'related',
+                scaleFactor: 0.5,
+            },
+        },
+    })));
     
-    edges.forEach(edge => {
-        const from = positions[edge.source];
-        const to = positions[edge.target];
-        
-        if (from && to) {
-            ctx.beginPath();
-            ctx.moveTo(from.x, from.y);
-            ctx.lineTo(to.x, to.y);
-            ctx.stroke();
+    // Network options - synapse-like physics
+    const options = {
+        nodes: {
+            shape: 'dot',
+            scaling: {
+                min: 10,
+                max: 30,
+            },
+        },
+        edges: {
+            smooth: {
+                enabled: true,
+                type: 'continuous',
+            },
+        },
+        physics: {
+            enabled: physicsEnabled,
+            solver: 'forceAtlas2Based',
+            forceAtlas2Based: {
+                gravitationalConstant: -50,
+                centralGravity: 0.01,
+                springLength: 150,
+                springConstant: 0.08,
+                damping: 0.4,
+                avoidOverlap: 0.5,
+            },
+            stabilization: {
+                enabled: true,
+                iterations: 200,
+                updateInterval: 25,
+            },
+        },
+        interaction: {
+            hover: true,
+            tooltipDelay: 100,
+            zoomView: true,
+            dragView: true,
+            dragNodes: true,
+            navigationButtons: false,
+            keyboard: {
+                enabled: true,
+                speed: { x: 10, y: 10, zoom: 0.02 },
+                bindToWindow: false,
+            },
+            zoomSpeed: 1,
+        },
+        layout: {
+            improvedLayout: true,
+            randomSeed: 42,
+        },
+    };
+    
+    // Clear previous network
+    if (networkInstance) {
+        networkInstance.destroy();
+        networkInstance = null;
+    }
+    
+    // Create new network
+    const data = { nodes: visNodes, edges: visEdges };
+    networkInstance = new vis.Network(container, data, options);
+    
+    // Click handler - show memory detail
+    networkInstance.on('click', function(params) {
+        if (params.nodes.length > 0) {
+            const nodeId = params.nodes[0];
+            fetchMemoryDetail(nodeId);
         }
     });
     
-    // Draw nodes
-    const TYPE_COLORS = {
-        insight: '#00ffff',
-        success: '#00ff88',
-        failure: '#ff4757',
-        decision: '#ff9500',
-        note: '#8b949e',
-    };
-    
-    nodes.forEach(node => {
-        const pos = positions[node.id];
-        const color = TYPE_COLORS[node.type] || TYPE_COLORS.note;
-        
-        // Node circle
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        
-        // Glow effect
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        
-        // Label
-        ctx.fillStyle = '#e6edf3';
-        ctx.font = '11px JetBrains Mono';
-        ctx.textAlign = 'center';
-        ctx.fillText(node.label.substring(0, 20), pos.x, pos.y + 20);
+    // Double-click to focus
+    networkInstance.on('doubleClick', function(params) {
+        if (params.nodes.length > 0) {
+            networkInstance.focus(params.nodes[0], {
+                scale: 1.5,
+                animation: {
+                    duration: 500,
+                    easingFunction: 'easeInOutQuad',
+                },
+            });
+        }
     });
+}
+
+// Graph control functions
+function setupGraphControls() {
+    const zoomInBtn = document.getElementById('graph-zoom-in');
+    const zoomOutBtn = document.getElementById('graph-zoom-out');
+    const fitBtn = document.getElementById('graph-fit');
+    const physicsBtn = document.getElementById('graph-physics');
+    
+    if (zoomInBtn) {
+        zoomInBtn.addEventListener('click', () => {
+            if (networkInstance) {
+                const scale = networkInstance.getScale();
+                networkInstance.moveTo({ scale: scale * 1.3, animation: { duration: 300 } });
+            }
+        });
+    }
+    
+    if (zoomOutBtn) {
+        zoomOutBtn.addEventListener('click', () => {
+            if (networkInstance) {
+                const scale = networkInstance.getScale();
+                networkInstance.moveTo({ scale: scale / 1.3, animation: { duration: 300 } });
+            }
+        });
+    }
+    
+    if (fitBtn) {
+        fitBtn.addEventListener('click', () => {
+            if (networkInstance) {
+                networkInstance.fit({ animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+            }
+        });
+    }
+    
+    if (physicsBtn) {
+        physicsBtn.addEventListener('click', () => {
+            physicsEnabled = !physicsEnabled;
+            physicsBtn.classList.toggle('active', physicsEnabled);
+            if (networkInstance) {
+                networkInstance.setOptions({ physics: { enabled: physicsEnabled } });
+            }
+        });
+        // Set initial state
+        physicsBtn.classList.toggle('active', physicsEnabled);
+    }
 }
 
 // ============ Utilities ============
@@ -526,10 +654,13 @@ function init() {
     
     // Window resize handler for graph
     window.addEventListener('resize', () => {
-        if (state.currentTab === 'graph') {
-            renderGraph();
+        if (state.currentTab === 'graph' && networkInstance) {
+            networkInstance.fit({ animation: false });
         }
     });
+    
+    // Setup graph controls
+    setupGraphControls();
     
     // Initial load
     fetchStats();
