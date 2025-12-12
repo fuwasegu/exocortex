@@ -401,3 +401,170 @@ class TestDreamWorkerBackup:
             result = worker._backup_database()
 
             assert result is True
+
+
+class TestDreamWorkerAutoLinking:
+    """Tests for auto-linking task."""
+
+    def test_find_tag_shared_pairs_with_enough_shared_tags(self):
+        """Memories with 3+ shared tags should be paired."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+            worker._running = True
+
+            # Create mock memories with shared tags
+            mem_a = MagicMock()
+            mem_a.id = "mem-a"
+            mem_a.tags = ["database", "performance", "optimization", "sql"]
+
+            mem_b = MagicMock()
+            mem_b.id = "mem-b"
+            mem_b.tags = ["database", "performance", "optimization", "indexing"]
+
+            memories = [mem_a, mem_b]
+            existing_links: set[tuple[str, str]] = set()
+            processed_pairs: set[tuple[str, str]] = set()
+
+            results = worker._find_tag_shared_pairs(
+                memories, existing_links, processed_pairs, min_shared_tags=3
+            )
+
+            assert len(results) == 1
+            assert results[0][0] == "mem-a"
+            assert results[0][1] == "mem-b"
+            assert "database" in results[0][2]
+            assert "performance" in results[0][2]
+            assert "optimization" in results[0][2]
+
+    def test_find_tag_shared_pairs_skips_insufficient_tags(self):
+        """Memories with < 3 shared tags should not be paired."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+            worker._running = True
+
+            mem_a = MagicMock()
+            mem_a.id = "mem-a"
+            mem_a.tags = ["database", "performance"]
+
+            mem_b = MagicMock()
+            mem_b.id = "mem-b"
+            mem_b.tags = ["database", "frontend"]
+
+            memories = [mem_a, mem_b]
+            existing_links: set[tuple[str, str]] = set()
+            processed_pairs: set[tuple[str, str]] = set()
+
+            results = worker._find_tag_shared_pairs(
+                memories, existing_links, processed_pairs, min_shared_tags=3
+            )
+
+            assert len(results) == 0
+
+    def test_find_tag_shared_pairs_skips_existing_links(self):
+        """Already linked memories should not be paired again."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+            worker._running = True
+
+            mem_a = MagicMock()
+            mem_a.id = "mem-a"
+            mem_a.tags = ["a", "b", "c", "d"]
+
+            mem_b = MagicMock()
+            mem_b.id = "mem-b"
+            mem_b.tags = ["a", "b", "c", "e"]
+
+            memories = [mem_a, mem_b]
+            existing_links = {("mem-a", "mem-b")}  # Already linked
+            processed_pairs: set[tuple[str, str]] = set()
+
+            results = worker._find_tag_shared_pairs(
+                memories, existing_links, processed_pairs, min_shared_tags=3
+            )
+
+            assert len(results) == 0
+
+    def test_find_semantic_pairs_with_high_similarity(self):
+        """Memories with 80%+ similarity should be paired."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+            worker._running = True
+
+            mem_a = MagicMock()
+            mem_a.id = "mem-a"
+            mem_a.content = "Test content"
+
+            # Mock repo with search results
+            mock_repo = MagicMock()
+            mock_repo._embedding_engine.embed.return_value = [0.1, 0.2, 0.3]
+            # Returns: (id, summary, similarity, tags, type)
+            mock_repo.search_similar_by_embedding.return_value = [
+                ("mem-b", "Summary B", 0.85, ["tag"], "insight"),
+            ]
+
+            memories = [mem_a]
+            existing_links: set[tuple[str, str]] = set()
+            processed_pairs: set[tuple[str, str]] = set()
+
+            results = worker._find_semantic_pairs(
+                memories,
+                existing_links,
+                processed_pairs,
+                mock_repo,
+                min_similarity=0.80,
+            )
+
+            assert len(results) == 1
+            assert results[0][0] == "mem-a"
+            assert results[0][1] == "mem-b"
+            assert results[0][2] == 0.85
+
+    def test_find_semantic_pairs_skips_low_similarity(self):
+        """Memories with < 80% similarity should not be paired."""
+        from exocortex.config import Config
+        from exocortex.worker.dream import DreamWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(data_dir=Path(tmpdir))
+            worker = DreamWorker(config=config)
+            worker._running = True
+
+            mem_a = MagicMock()
+            mem_a.id = "mem-a"
+            mem_a.content = "Test content"
+
+            mock_repo = MagicMock()
+            mock_repo._embedding_engine.embed.return_value = [0.1, 0.2, 0.3]
+            mock_repo.search_similar_by_embedding.return_value = [
+                ("mem-b", "Summary B", 0.75, ["tag"], "insight"),  # Below threshold
+            ]
+
+            memories = [mem_a]
+            existing_links: set[tuple[str, str]] = set()
+            processed_pairs: set[tuple[str, str]] = set()
+
+            results = worker._find_semantic_pairs(
+                memories,
+                existing_links,
+                processed_pairs,
+                mock_repo,
+                min_similarity=0.80,
+            )
+
+            assert len(results) == 0

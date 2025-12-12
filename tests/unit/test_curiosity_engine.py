@@ -16,6 +16,7 @@ from exocortex.domain.services.curiosity import (
     CuriosityEngine,
     CuriosityReport,
     OutdatedKnowledge,
+    SuggestedLink,
 )
 
 
@@ -258,6 +259,117 @@ class TestCuriosityEngineQuestionGeneration:
         assert "一貫" in questions[0]
 
 
+class TestCuriosityEngineSuggestedLinks:
+    """Tests for suggested link detection."""
+
+    @pytest.fixture
+    def engine(self):
+        """Create engine with mock repository."""
+        mock_repo = MagicMock()
+        mock_repo.get_links.return_value = []
+        return CuriosityEngine(repository=mock_repo)
+
+    @pytest.fixture
+    def mock_memories_shared_tags(self):
+        """Create memories with shared tags."""
+        mem_a = MagicMock()
+        mem_a.id = "mem-a"
+        mem_a.summary = "Database optimization technique"
+        mem_a.content = "Use connection pooling for better performance"
+        mem_a.memory_type = "insight"
+        mem_a.context_name = "project-a"
+        mem_a.tags = ["database", "performance", "optimization"]
+
+        mem_b = MagicMock()
+        mem_b.id = "mem-b"
+        mem_b.summary = "Query optimization approach"
+        mem_b.content = "Index frequently queried columns"
+        mem_b.memory_type = "insight"
+        mem_b.context_name = "project-b"
+        mem_b.tags = ["database", "performance", "sql"]
+
+        return [mem_a, mem_b]
+
+    @pytest.fixture
+    def mock_memories_same_context(self):
+        """Create memories in same context with same type."""
+        mem_a = MagicMock()
+        mem_a.id = "mem-c"
+        mem_a.summary = "API design decision"
+        mem_a.content = "Use REST for public API"
+        mem_a.memory_type = "decision"
+        mem_a.context = "backend-project"
+        mem_a.tags = ["api"]
+
+        mem_b = MagicMock()
+        mem_b.id = "mem-d"
+        mem_b.summary = "Authentication decision"
+        mem_b.content = "Use JWT tokens"
+        mem_b.memory_type = "decision"
+        mem_b.context = "backend-project"
+        mem_b.tags = ["auth"]
+
+        return [mem_a, mem_b]
+
+    def test_finds_tag_shared_links(self, engine, mock_memories_shared_tags):
+        """Memories with 2+ shared tags should be suggested as links."""
+        engine._repo.list_memories.return_value = (mock_memories_shared_tags, 2, False)
+
+        suggestions = engine._find_tag_shared_links(
+            mock_memories_shared_tags, set(), set(), 10
+        )
+
+        assert len(suggestions) == 1
+        assert suggestions[0].link_type == "tag_shared"
+        assert (
+            "database" in suggestions[0].reason
+            or "performance" in suggestions[0].reason
+        )
+        assert suggestions[0].confidence >= 0.5
+
+    def test_finds_context_shared_links(self, engine, mock_memories_same_context):
+        """Memories in same context with same type should be suggested."""
+        suggestions = engine._find_context_shared_links(
+            mock_memories_same_context, set(), set(), 10
+        )
+
+        assert len(suggestions) == 1
+        assert suggestions[0].link_type == "context_shared"
+        assert "backend-project" in suggestions[0].reason
+        assert "decision" in suggestions[0].reason
+
+    def test_skips_already_linked_memories(self, engine, mock_memories_shared_tags):
+        """Should not suggest links for already linked memories."""
+        existing_links = {("mem-a", "mem-b")}
+
+        suggestions = engine._find_tag_shared_links(
+            mock_memories_shared_tags, existing_links, set(), 10
+        )
+
+        assert len(suggestions) == 0
+
+    def test_generates_link_question(self, engine):
+        """Should generate question when suggested links found."""
+        report = CuriosityReport(
+            suggested_links=[
+                SuggestedLink(
+                    source_id="a",
+                    source_summary="A",
+                    target_id="b",
+                    target_summary="B",
+                    reason="Share 2 tags",
+                    link_type="tag_shared",
+                    confidence=0.7,
+                )
+            ]
+        )
+
+        questions = engine._generate_questions(report)
+
+        assert len(questions) >= 1
+        assert "リンク" in questions[0]
+
+
 class TestCuriosityReportSerialization:
     """Tests for CuriosityReport serialization."""
 
@@ -269,6 +381,7 @@ class TestCuriosityReportSerialization:
         assert result["contradictions"] == []
         assert result["outdated_knowledge"] == []
         assert result["knowledge_gaps"] == []
+        assert result["suggested_links"] == []
         assert result["questions"] == []
 
     def test_to_dict_with_data(self):
@@ -285,6 +398,17 @@ class TestCuriosityReportSerialization:
                     confidence=0.75,
                 )
             ],
+            suggested_links=[
+                SuggestedLink(
+                    source_id="x",
+                    source_summary="Source",
+                    target_id="y",
+                    target_summary="Target",
+                    reason="Share tags",
+                    link_type="tag_shared",
+                    confidence=0.8,
+                )
+            ],
             questions=["Is this correct?"],
             scan_summary="Found 1 issue",
         )
@@ -294,5 +418,8 @@ class TestCuriosityReportSerialization:
         assert len(result["contradictions"]) == 1
         assert result["contradictions"][0]["memory_a_id"] == "a"
         assert result["contradictions"][0]["confidence"] == 0.75
+        assert len(result["suggested_links"]) == 1
+        assert result["suggested_links"][0]["source_id"] == "x"
+        assert result["suggested_links"][0]["link_type"] == "tag_shared"
         assert result["questions"] == ["Is this correct?"]
         assert result["scan_summary"] == "Found 1 issue"

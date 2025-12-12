@@ -63,12 +63,27 @@ class KnowledgeGap:
 
 
 @dataclass
+class SuggestedLink:
+    """A suggested link between two memories."""
+
+    source_id: str
+    source_summary: str
+    target_id: str
+    target_summary: str
+    reason: str
+    link_type: str  # "tag_shared", "context_shared", "semantic_similar"
+    confidence: float
+    suggested_relation: str = "related"  # Default relation type to use
+
+
+@dataclass
 class CuriosityReport:
     """Report from the Curiosity Engine's scan."""
 
     contradictions: list[Contradiction] = field(default_factory=list)
     outdated_knowledge: list[OutdatedKnowledge] = field(default_factory=list)
     knowledge_gaps: list[KnowledgeGap] = field(default_factory=list)
+    suggested_links: list[SuggestedLink] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
     scan_summary: str = ""
 
@@ -105,6 +120,19 @@ class CuriosityReport:
                     "suggestion": g.suggestion,
                 }
                 for g in self.knowledge_gaps
+            ],
+            "suggested_links": [
+                {
+                    "source_id": s.source_id,
+                    "source_summary": s.source_summary,
+                    "target_id": s.target_id,
+                    "target_summary": s.target_summary,
+                    "reason": s.reason,
+                    "link_type": s.link_type,
+                    "confidence": s.confidence,
+                    "suggested_relation": s.suggested_relation,
+                }
+                for s in self.suggested_links
             ],
             "questions": self.questions,
             "scan_summary": self.scan_summary,
@@ -244,6 +272,12 @@ class CuriosityEngine:
         # Find outdated knowledge (stale, not superseded)
         outdated = self._find_outdated_knowledge(context_filter, max_findings)
         report.outdated_knowledge = outdated
+
+        # Find suggested links (unlinked but related memories)
+        suggested_links = self._find_suggested_links(
+            context_filter, tag_filter, max_findings
+        )
+        report.suggested_links = suggested_links
 
         # Generate questions based on findings
         report.questions = self._generate_questions(report)
@@ -481,6 +515,245 @@ class CuriosityEngine:
 
         return outdated
 
+    def _find_suggested_links(
+        self,
+        context_filter: str | None,
+        tag_filter: list[str] | None,
+        max_findings: int,
+    ) -> list[SuggestedLink]:
+        """Find unlinked memories that should be connected.
+
+        Uses three strategies:
+        1. Tag sharing - memories with same tags
+        2. Context sharing - memories in same project/context
+        3. Semantic similarity - high similarity (>0.7) memories
+
+        Only suggests links for memories that aren't already linked.
+        """
+        suggested: list[SuggestedLink] = []
+        checked_pairs: set[tuple[str, str]] = set()
+        existing_links = self._get_existing_link_pairs()
+
+        # Get memories to analyze
+        memories, _, _ = self._repo.list_memories(
+            limit=100,
+            context_filter=context_filter,
+            tag_filter=tag_filter,
+        )
+
+        if len(memories) < 2:
+            return suggested
+
+        # Strategy 1: Tag sharing (high confidence)
+        tag_suggestions = self._find_tag_shared_links(
+            memories, existing_links, checked_pairs, max_findings
+        )
+        suggested.extend(tag_suggestions)
+
+        # Strategy 2: Context sharing (medium confidence)
+        context_suggestions = self._find_context_shared_links(
+            memories, existing_links, checked_pairs, max_findings - len(suggested)
+        )
+        suggested.extend(context_suggestions)
+
+        # Strategy 3: Semantic similarity (high confidence for >0.7)
+        semantic_suggestions = self._find_semantic_links(
+            memories, existing_links, checked_pairs, max_findings - len(suggested)
+        )
+        suggested.extend(semantic_suggestions)
+
+        return suggested[:max_findings]
+
+    def _get_existing_link_pairs(self) -> set[tuple[str, str]]:
+        """Get all existing link pairs to avoid duplicate suggestions."""
+        pairs: set[tuple[str, str]] = set()
+        try:
+            # Get all memories with links
+            memories, _, _ = self._repo.list_memories(limit=500)
+            for mem in memories:
+                links = self._repo.get_links(mem.id)
+                for link in links:
+                    pair = tuple(sorted([mem.id, link.target_id]))
+                    pairs.add(pair)
+        except Exception as e:
+            logger.warning(f"Error getting existing links: {e}")
+        return pairs
+
+    def _find_tag_shared_links(
+        self,
+        memories: list,
+        existing_links: set[tuple[str, str]],
+        checked_pairs: set[tuple[str, str]],
+        max_findings: int,
+    ) -> list[SuggestedLink]:
+        """Find memories that share multiple tags but aren't linked."""
+        suggested: list[SuggestedLink] = []
+
+        # Group memories by tags
+        tag_to_memories: dict[str, list] = {}
+        for mem in memories:
+            for tag in mem.tags or []:
+                if tag not in tag_to_memories:
+                    tag_to_memories[tag] = []
+                tag_to_memories[tag].append(mem)
+
+        # Find pairs with multiple shared tags
+        for i, mem_a in enumerate(memories):
+            if len(suggested) >= max_findings:
+                break
+
+            for mem_b in memories[i + 1 :]:
+                if len(suggested) >= max_findings:
+                    break
+
+                pair = tuple(sorted([mem_a.id, mem_b.id]))
+                if pair in checked_pairs or pair in existing_links:
+                    continue
+
+                shared_tags = set(mem_a.tags or []) & set(mem_b.tags or [])
+                if len(shared_tags) >= 2:  # At least 2 shared tags
+                    checked_pairs.add(pair)
+                    confidence = min(0.5 + len(shared_tags) * 0.1, 0.9)
+                    suggested.append(
+                        SuggestedLink(
+                            source_id=mem_a.id,
+                            source_summary=mem_a.summary[:80] if mem_a.summary else "",
+                            target_id=mem_b.id,
+                            target_summary=mem_b.summary[:80] if mem_b.summary else "",
+                            reason=f"Share {len(shared_tags)} tags: {', '.join(list(shared_tags)[:3])}",
+                            link_type="tag_shared",
+                            confidence=confidence,
+                            suggested_relation="related",
+                        )
+                    )
+
+        return suggested
+
+    def _find_context_shared_links(
+        self,
+        memories: list,
+        existing_links: set[tuple[str, str]],
+        checked_pairs: set[tuple[str, str]],
+        max_findings: int,
+    ) -> list[SuggestedLink]:
+        """Find memories in same context with same type but aren't linked."""
+        suggested: list[SuggestedLink] = []
+
+        # Group by context
+        context_to_memories: dict[str, list] = {}
+        for mem in memories:
+            ctx = mem.context or "unknown"
+            if ctx not in context_to_memories:
+                context_to_memories[ctx] = []
+            context_to_memories[ctx].append(mem)
+
+        # Find pairs in same context with same type
+        for ctx, ctx_memories in context_to_memories.items():
+            if len(suggested) >= max_findings:
+                break
+
+            for i, mem_a in enumerate(ctx_memories):
+                if len(suggested) >= max_findings:
+                    break
+
+                for mem_b in ctx_memories[i + 1 :]:
+                    if len(suggested) >= max_findings:
+                        break
+
+                    pair = tuple(sorted([mem_a.id, mem_b.id]))
+                    if pair in checked_pairs or pair in existing_links:
+                        continue
+
+                    # Same context + same type = likely related
+                    type_a = str(mem_a.memory_type).lower() if mem_a.memory_type else ""
+                    type_b = str(mem_b.memory_type).lower() if mem_b.memory_type else ""
+
+                    if type_a == type_b and type_a in [
+                        "insight",
+                        "decision",
+                        "success",
+                    ]:
+                        checked_pairs.add(pair)
+                        suggested.append(
+                            SuggestedLink(
+                                source_id=mem_a.id,
+                                source_summary=mem_a.summary[:80]
+                                if mem_a.summary
+                                else "",
+                                target_id=mem_b.id,
+                                target_summary=mem_b.summary[:80]
+                                if mem_b.summary
+                                else "",
+                                reason=f"Same context '{ctx}' and type '{type_a}'",
+                                link_type="context_shared",
+                                confidence=0.6,
+                                suggested_relation="related",
+                            )
+                        )
+
+        return suggested
+
+    def _find_semantic_links(
+        self,
+        memories: list,
+        existing_links: set[tuple[str, str]],
+        checked_pairs: set[tuple[str, str]],
+        max_findings: int,
+    ) -> list[SuggestedLink]:
+        """Find memories with high semantic similarity that aren't linked."""
+        suggested: list[SuggestedLink] = []
+        similarity_threshold = 0.70  # High similarity threshold
+
+        # Sample memories for semantic search (avoid too many queries)
+        sample_size = min(20, len(memories))
+        sample_memories = memories[:sample_size]
+
+        for mem in sample_memories:
+            if len(suggested) >= max_findings:
+                break
+
+            # Search for similar memories
+            try:
+                similar_memories, _ = self._repo.search_by_similarity(
+                    query=mem.content or mem.summary or "",
+                    limit=5,
+                )
+            except Exception as e:
+                logger.warning(f"Error in semantic search: {e}")
+                continue
+
+            for similar in similar_memories:
+                if len(suggested) >= max_findings:
+                    break
+
+                # Skip self
+                if similar.id == mem.id:
+                    continue
+
+                pair = tuple(sorted([mem.id, similar.id]))
+                if pair in checked_pairs or pair in existing_links:
+                    continue
+
+                similarity = similar.similarity or 0.0
+                if similarity >= similarity_threshold:
+                    checked_pairs.add(pair)
+                    suggested.append(
+                        SuggestedLink(
+                            source_id=mem.id,
+                            source_summary=mem.summary[:80] if mem.summary else "",
+                            target_id=similar.id,
+                            target_summary=similar.summary[:80]
+                            if similar.summary
+                            else "",
+                            reason=f"High semantic similarity ({similarity:.0%})",
+                            link_type="semantic_similar",
+                            confidence=similarity,
+                            suggested_relation="related",
+                        )
+                    )
+
+        return suggested
+
     def _check_if_superseded(self, memory_id: str) -> bool:
         """Check if a memory has been superseded by another memory.
 
@@ -515,7 +788,17 @@ class CuriosityEngine:
                 "まだ有効ですか？新しい情報で更新が必要では？"
             )
 
-        if not report.contradictions and not report.outdated_knowledge:
+        if report.suggested_links:
+            questions.append(
+                "🔗 リンクされていない関連メモリが見つかりました。"
+                "これらをリンクして知識グラフを強化しませんか？"
+            )
+
+        if (
+            not report.contradictions
+            and not report.outdated_knowledge
+            and not report.suggested_links
+        ):
             questions.append(
                 "✨ 知識ベースは一貫しています！"
                 "引き続き知見を記録して、より強いパターンを構築しましょう。"
@@ -535,6 +818,11 @@ class CuriosityEngine:
         if report.outdated_knowledge:
             parts.append(
                 f"Found {len(report.outdated_knowledge)} potentially stale item(s) needing review"
+            )
+
+        if report.suggested_links:
+            parts.append(
+                f"Found {len(report.suggested_links)} suggested link(s) to strengthen the knowledge graph"
             )
 
         if not parts:

@@ -1116,13 +1116,14 @@ def curiosity_scan(
     tag_filter: list[str] | None = None,
     max_findings: int = 10,
 ) -> dict[str, Any]:
-    """Scan the knowledge base with curiosity - find contradictions and questions.
+    """Scan the knowledge base with curiosity - find contradictions, links, and questions.
 
     The Curiosity Engine is like a curious human that notices inconsistencies
     and asks questions. It looks for:
 
     🤔 **Contradictions**: "Wait, these two memories seem to contradict each other..."
     📅 **Outdated Knowledge**: "This knowledge has been superseded, is it still valid?"
+    🔗 **Suggested Links**: Unlinked memories that should be connected (by tag, context, or similarity)
     ❓ **Questions**: Human-like questions about your knowledge base
 
     This tool helps you maintain a consistent and up-to-date knowledge base
@@ -1134,12 +1135,12 @@ def curiosity_scan(
         max_findings: Maximum findings per category (default: 10).
 
     Returns:
-        CuriosityReport with contradictions, outdated knowledge, and questions.
+        CuriosityReport with contradictions, outdated knowledge, suggested links, and questions.
 
     Example usage:
         - "Scan my knowledge base for contradictions"
         - "What inconsistencies exist in my architecture decisions?"
-        - "Question my assumptions about the database design"
+        - "Find unlinked memories that should be connected"
     """
     container = get_container()
     report = container.memory_service.curiosity_scan(
@@ -1184,8 +1185,27 @@ def curiosity_scan(
             }
         )
 
+    # Medium priority: create suggested links
+    for link in report.suggested_links[:5]:
+        next_actions.append(
+            {
+                "action": "create_link",
+                "priority": "medium",
+                "description": f"Link: {link.reason[:50]}",
+                "details": {
+                    "call": "exo_link_memories",
+                    "args": {
+                        "source_id": link.source_id,
+                        "target_id": link.target_id,
+                        "relation_type": link.suggested_relation,
+                        "reason": link.reason,
+                    },
+                },
+            }
+        )
+
     # If issues found, suggest analyze_knowledge
-    if report.contradictions or report.outdated_knowledge:
+    if report.contradictions or report.outdated_knowledge or report.suggested_links:
         next_actions.append(
             {
                 "action": "full_analysis",
