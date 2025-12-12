@@ -347,7 +347,9 @@ async def api_graph(request: Request) -> JSONResponse:
 
         # Sort by link count (descending) and take top N
         max_primary_nodes = 100
-        sorted_ids = sorted(link_counts.keys(), key=lambda x: link_counts[x], reverse=True)
+        sorted_ids = sorted(
+            link_counts.keys(), key=lambda x: link_counts[x], reverse=True
+        )
         primary_ids = set(sorted_ids[:max_primary_nodes])
 
         # Include all nodes that are linked to/from primary nodes
