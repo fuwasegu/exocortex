@@ -642,7 +642,7 @@ class CuriosityEngine:
         # Group by context
         context_to_memories: dict[str, list] = {}
         for mem in memories:
-            ctx = mem.context_name or "unknown"
+            ctx = mem.context or "unknown"
             if ctx not in context_to_memories:
                 context_to_memories[ctx] = []
             context_to_memories[ctx].append(mem)
