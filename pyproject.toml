@@ -1,6 +1,6 @@
 [project]
 name = "exocortex"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local MCP Server acting as your external brain for development insights."
 readme = "README.md"
 requires-python = ">=3.10"

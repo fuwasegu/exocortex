@@ -305,42 +305,77 @@ async def stream_dream_log(request: Request) -> StreamingResponse:
 
 
 async def api_graph(request: Request) -> JSONResponse:
-    """Get graph data for visualization."""
+    """Get graph data for visualization.
+
+    Strategy: Show nodes with most links first, and include all linked nodes.
+    This ensures the graph shows the most connected parts of the knowledge base.
+    """
     try:
         container = get_container()
         repo = container.repository
 
-        # Get all memories (limited)
-        memories, _total, _has_more = repo.list_memories(limit=100, offset=0)
+        # Get all memories to count links
+        all_memories, _total, _ = repo.list_memories(limit=500, offset=0)
 
-        nodes = []
-        edges = []
-        seen_edges = set()
+        # Build link count and collect all edges
+        memory_map: dict[str, dict] = {}
+        link_counts: dict[str, int] = {}
+        all_edges: list[tuple[str, str, str]] = []  # (source, target, type)
 
-        for memory in memories:
-            nodes.append(
-                {
-                    "id": memory.id,
-                    "label": (memory.summary or memory.content)[:50],
-                    "type": memory.memory_type.value if memory.memory_type else "note",
-                    "context": memory.context,
-                }
-            )
+        for memory in all_memories:
+            memory_map[memory.id] = {
+                "id": memory.id,
+                "label": (memory.summary or memory.content)[:50],
+                "type": memory.memory_type.value if memory.memory_type else "note",
+                "context": memory.context,
+            }
+            link_counts[memory.id] = 0
 
-            # Get links for this memory
+            # Get outgoing links
             memory_links = repo.get_links(memory.id)
             for link in memory_links:
-                edge_key = (memory.id, link.target_id)
-                if edge_key not in seen_edges:
-                    edges.append(
-                        {
-                            "source": memory.id,
-                            "target": link.target_id,
-                            "type": link.relation_type.value
-                            if link.relation_type
-                            else "related",
-                        }
+                link_counts[memory.id] = link_counts.get(memory.id, 0) + 1
+                # Also count incoming for target
+                link_counts[link.target_id] = link_counts.get(link.target_id, 0) + 1
+                all_edges.append(
+                    (
+                        memory.id,
+                        link.target_id,
+                        link.relation_type.value if link.relation_type else "related",
                     )
+                )
+
+        # Sort by link count (descending) and take top N
+        max_primary_nodes = 100
+        sorted_ids = sorted(
+            link_counts.keys(), key=lambda x: link_counts[x], reverse=True
+        )
+        primary_ids = set(sorted_ids[:max_primary_nodes])
+
+        # Include all nodes that are linked to/from primary nodes
+        included_ids = set(primary_ids)
+        for source, target, _ in all_edges:
+            if source in primary_ids:
+                included_ids.add(target)
+            if target in primary_ids:
+                included_ids.add(source)
+
+        # Build final nodes (only those we have data for)
+        nodes = []
+        for mem_id in included_ids:
+            if mem_id in memory_map:
+                node = memory_map[mem_id].copy()
+                node["link_count"] = link_counts.get(mem_id, 0)
+                nodes.append(node)
+
+        # Build final edges (only between included nodes)
+        edges = []
+        seen_edges: set[tuple[str, str]] = set()
+        for source, target, rel_type in all_edges:
+            if source in included_ids and target in included_ids:
+                edge_key = (source, target)
+                if edge_key not in seen_edges:
+                    edges.append({"source": source, "target": target, "type": rel_type})
                     seen_edges.add(edge_key)
 
         return JSONResponse(
